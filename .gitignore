@@ -1,0 +1,17 @@
+# Python
+__pycache__
+*.pyc
+/build
+/dist
+/*.egg-info
+
+# Editor
+*.swp
+/.vscode
+
+# Tools
+/.venv
+.ipynb_checkpoints
+
+# OS
+/.DS_Store

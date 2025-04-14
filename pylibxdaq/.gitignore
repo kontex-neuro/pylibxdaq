@@ -1,0 +1,6 @@
+resources
+*.so
+*.dylib
+*.dll
+CMakeUserPresets.json
+pyxdaq_device.pyi

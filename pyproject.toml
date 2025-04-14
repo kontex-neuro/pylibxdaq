@@ -1,0 +1,22 @@
+[project]
+name = "pylibxdaq"
+version = "0.1.0"
+dependencies = ["typing_extensions"]
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = ["Programming Language :: Python :: 3.12"]
+
+[build-system]
+requires = ["setuptools>=42.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["pylibxdaq", "pylibxdaq.*"]
+
+[tool.setuptools.package-data]
+"pylibxdaq" = ["py.typed", "*.so", "*.pyd"]
+"pylibxdaq.managers" = ["*.so", "*.dll", "*.dylib"]
+"pylibxdaq.resources" = ["*.bit"]
+
+[tool.isort]
+line_length = 100
