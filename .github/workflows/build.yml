@@ -1,0 +1,121 @@
+name: Build and publish package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os_arch:
+          [
+            { os: windows-2022, arch: x64 },
+            { os: macos-15, arch: arm64 },
+            { os: ubuntu-24.04, arch: x64 }
+          ]
+        py: ["3.11", "3.12", "3.13"]
+
+    runs-on: ${{ matrix.os_arch.os }}
+
+    env:
+      OS_ARCH: ${{ matrix.os_arch.os }}-${{ matrix.os_arch.arch }}
+
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+
+      - name: Install build tools
+        run: pip install conan ninja build twine
+
+      - name: Install build tools (Ubuntu)
+        if: matrix.os_arch.os == 'ubuntu-24.04'
+        run: |
+          pip install auditwheel
+
+      - name: Install build tools (MacOS)
+        if: matrix.os_arch.os == 'macos-15'
+        run: |
+          pip install delocate
+
+      - name: conan cache
+        id: conan_cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2
+          key: ${{ env.OS_ARCH }}-conan
+
+      - name: Setup Compiler (Windows)
+        uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.os_arch.os == 'windows-2022'
+
+      - name: Setup Compiler (MacOS)
+        if: matrix.os_arch.os == 'macos-15'
+        run: |
+          echo "CC=$(brew --prefix llvm@18)/bin/clang" >> $GITHUB_ENV
+          echo "CXX=$(brew --prefix llvm@18)/bin/clang++" >> $GITHUB_ENV
+          sed -i '' '/^#define _LIBCPP_HAS_NO_VENDOR_AVAILABILITY_ANNOTATIONS/d' "$(brew --prefix llvm@18)"/include/c++/v1/__config_site
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Conan setup
+        run: |
+          conan config install .github/conan_profiles/${{ env.OS_ARCH }} -tf profiles
+
+      - name: Install libxdaq
+        run: |
+          git submodule update --init --recursive
+          conan create libxdaq-dist --profile:all ${{ env.OS_ARCH }} -s build_type=Release --build=missing
+
+      - name: Build and install pylibxdaq
+        working-directory: ./pylibxdaq
+        run: |
+          conan install . --build=missing --profile:all ${{ env.OS_ARCH }} -s build_type=Release -of ..
+          cmake -S . -B ../build/Release --preset conan-release -DCMAKE_INSTALL_PREFIX="../pylibxdaq"
+          cmake --build ../build/Release --preset conan-release --target install
+      
+      - name: Build package
+        run: |
+          python -m build -w
+
+      - name: Fix binary and upload (Ubuntu)
+        if: matrix.os_arch.os == 'ubuntu-24.04'
+        run: |
+          auditwheel repair --plat manylinux_2_39_x86_64 $(find dist -name '*.whl')
+          rm -r dist && mv wheelhouse dist
+
+      - name: Fix binary and upload (MacOS)
+        if: matrix.os_arch.os == 'macos-15'
+        run: |
+          delocate-wheel -w fixed_wheels -v $(find dist -name '*.whl')
+          rm -r dist && mv fixed_wheels dist
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.OS_ARCH }}-${{ matrix.py }}
+          path: dist/*.whl
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten dist directory
+        run: |
+          mkdir -p flat_dist
+          find dist -name '*.whl' -exec cp {} flat_dist/ \;
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+          packages-dir: flat_dist
