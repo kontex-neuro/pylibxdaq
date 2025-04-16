@@ -88,7 +88,7 @@ jobs:
       - name: Fix binary and upload (Ubuntu)
         if: matrix.os_arch.os == 'ubuntu-24.04'
         run: |
-          auditwheel repair --plat manylinux_2_39_x86_64 $(find dist -name '*.whl')
+          auditwheel repair --plat manylinux_2_39_x86_64 $(find dist -name '*.whl') --exclude 'libudev.*'
           rm -r dist && mv wheelhouse dist
 
       - name: Fix binary and upload (MacOS)
