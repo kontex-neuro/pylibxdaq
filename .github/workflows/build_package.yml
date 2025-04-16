@@ -1,7 +1,8 @@
-name: Build and publish package
+name: Build package
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   build:
@@ -96,26 +97,3 @@ jobs:
         with:
           name: ${{ env.OS_ARCH }}-${{ matrix.py }}
           path: dist/*.whl
-
-  publish:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-
-      - name: Flatten dist directory
-        run: |
-          mkdir -p flat_dist
-          find dist -name '*.whl' -exec cp {} flat_dist/ \;
-
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          verbose: true
-          packages-dir: flat_dist

@@ -1,0 +1,36 @@
+name: Publish package to test PyPI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: ./.github/workflows/build_package.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    env:
+      name: testpypi
+      url: https://test.pypi.org/project/pylibxdaq
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten dist directory
+        run: |
+          mkdir -p flat_dist
+          find dist -name '*.whl' -exec cp {} flat_dist/ \;
+
+      - name: Publish package distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+          skip-existing: true
+          packages-dir: flat_dist
+          repository-url: https://test.pypi.org/legacy/
