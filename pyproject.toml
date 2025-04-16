@@ -1,6 +1,6 @@
 [project]
 name = "pylibxdaq"
-version = "0.1.6a1"
+version = "0.1.6a2"
 dependencies = ["typing_extensions"]
 license = "MIT"
 license-files = ["LICENSE"]

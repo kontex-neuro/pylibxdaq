@@ -27,7 +27,7 @@ jobs:
           python-version: ${{ matrix.py }}
 
       - name: Install build tools
-        run: pip install conan ninja build twine
+        run: pip install conan ninja build twine pybind11_stubgen==2.5.3 typing_extensions
 
       - name: Install build tools (Ubuntu)
         if: matrix.os_arch.os == 'ubuntu-24.04'
@@ -76,6 +76,11 @@ jobs:
           cmake -S . -B ../build/Release --preset conan-release -DCMAKE_INSTALL_PREFIX="../pylibxdaq"
           cmake --build ../build/Release --preset conan-release --target install
       
+      - name: Generate stub
+        working-directory: ./pylibxdaq
+        run: |
+          python -m pybind11_stubgen pyxdaq_device -o .
+
       - name: Build package
         run: |
           python -m build -w
