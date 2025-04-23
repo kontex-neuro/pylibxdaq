@@ -201,35 +201,46 @@ PYBIND11_MODULE(pyxdaq_device, m)
                    callback,
                std::size_t chunk_size =
                    0) -> std::optional<std::unique_ptr<xdaq::Device::DataStream>> {
-                return d.start_read_stream(addr, [callback = std::move(callback)](auto &&event) {
-                    std::visit(
-                        [&callback](auto &&event) {
-                            using T = std::decay_t<decltype(event)>;
-                            using namespace xdaq::DataStream;
-                            if constexpr (std::is_same_v<T, Events::DataView>) {
-                                callback(std::nullopt, "Unsupported data type: DataView");
-                            } else if constexpr (std::is_same_v<T, Events::OwnedData>) {
-                                try {
-                                    callback(
-                                        ManagedBuffer{
-                                            .data = std::move(event.buffer), .size = event.length
-                                        },
-                                        std::nullopt
-                                    );
-                                } catch (const std::exception &e) {
-                                    spdlog::error("Error in callback: {}", e.what());
-                                }
-                            } else if constexpr (std::is_same_v<T, Events::Stop>) {
-                                callback(std::nullopt, std::nullopt);
-                            } else if constexpr (std::is_same_v<T, Events::Error>) {
-                                callback(std::nullopt, event.error);
-                            } else {
-                                static_assert(xdaq::always_false_v<T>, "non-exhaustive visitor");
-                            }
+                return d.start_read_stream(
+                    addr,
+                    xdaq::queue<xdaq::Device>(
+                        [callback = std::move(callback)](auto &&event) {
+                            std::visit(
+                                [&callback](auto &&event) {
+                                    using T = std::decay_t<decltype(event)>;
+                                    using namespace xdaq::DataStream;
+                                    if constexpr (std::is_same_v<T, Events::DataView>) {
+                                        callback(std::nullopt, "Unsupported data type: DataView");
+                                    } else if constexpr (std::is_same_v<T, Events::OwnedData>) {
+                                        try {
+                                            callback(
+                                                ManagedBuffer{
+                                                    .data = std::move(event.buffer),
+                                                    .size = event.length
+                                                },
+                                                std::nullopt
+                                            );
+                                        } catch (const std::exception &e) {
+                                            spdlog::error("Error in callback: {}", e.what());
+                                        }
+                                    } else if constexpr (std::is_same_v<T, Events::Stop>) {
+                                        callback(std::nullopt, std::nullopt);
+                                    } else if constexpr (std::is_same_v<T, Events::Error>) {
+                                        callback(std::nullopt, event.error);
+                                    } else {
+                                        static_assert(
+                                            xdaq::always_false_v<T>, "non-exhaustive visitor"
+                                        );
+                                    }
+                                },
+                                std::move(event)
+                            );
                         },
-                        std::move(event)
-                    );
-                });
+                        64,
+                        std::chrono::nanoseconds{0}
+                    ),
+                    chunk_size
+                );
             },
             py::arg("addr"),
             py::arg("callback"),
