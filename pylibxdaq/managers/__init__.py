@@ -1,6 +1,6 @@
 from pathlib import Path
 
-manager_paths = list(
+DeviceManagerPaths = list(
     {
         p.resolve()
         for p in Path(__file__).parent.glob('*')
