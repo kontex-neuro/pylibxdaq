@@ -199,11 +199,12 @@ PYBIND11_MODULE(pyxdaq_device, m)
                std::uint32_t addr,
                std::function<void(std::optional<ManagedBuffer> b, std::optional<std::string> error)>
                    callback,
-               std::size_t chunk_size =
-                   0) -> std::optional<std::unique_ptr<xdaq::Device::DataStream>> {
+               std::size_t chunk_size = 0,
+               std::size_t max_queue_elements =
+                   4096) -> std::optional<std::unique_ptr<xdaq::Device::DataStream>> {
                 return d.start_read_stream(
                     addr,
-                    xdaq::queue<xdaq::Device>(
+                    xdaq::DataStream::queue(
                         [callback = std::move(callback)](auto &&event) {
                             std::visit(
                                 [&callback](auto &&event) {
@@ -237,6 +238,7 @@ PYBIND11_MODULE(pyxdaq_device, m)
                             );
                         },
                         64,
+                        max_queue_elements,
                         std::chrono::nanoseconds{0}
                     ),
                     chunk_size
@@ -246,6 +248,7 @@ PYBIND11_MODULE(pyxdaq_device, m)
             py::arg("callback"),
             py::kw_only(),
             py::arg("chunk_size") = 0,
+            py::arg("max_queue_elements") = 4096,
             py::return_value_policy::move
         )
         .def(
@@ -255,12 +258,13 @@ PYBIND11_MODULE(pyxdaq_device, m)
                std::size_t alignment,
                std::function<void(std::optional<DataView> b, std::optional<std::string> error)>
                    callback,
-               std::size_t chunk_size =
-                   0) -> std::optional<std::unique_ptr<xdaq::Device::DataStream>> {
+               std::size_t chunk_size = 0,
+               std::size_t max_queue_elements =
+                   4096) -> std::optional<std::unique_ptr<xdaq::Device::DataStream>> {
                 return d.start_read_stream(
                     addr,
-                    xdaq::queue<xdaq::Device>(
-                        xdaq::aligned_read_stream<xdaq::Device>(
+                    xdaq::DataStream::queue(
+                        xdaq::DataStream::aligned_read_stream(
                             [callback = std::move(callback)](auto &&event) {
                                 std::visit(
                                     [&callback](auto &&event) {
@@ -301,6 +305,7 @@ PYBIND11_MODULE(pyxdaq_device, m)
                             alignment
                         ),
                         64,
+                        max_queue_elements,
                         std::chrono::nanoseconds{0}
                     ),
                     chunk_size
@@ -311,6 +316,7 @@ PYBIND11_MODULE(pyxdaq_device, m)
             py::arg("callback"),
             py::kw_only(),
             py::arg("chunk_size") = 0,
+            py::arg("max_queue_elements") = 4096,
             py::return_value_policy::move
         )
         .def("get_status", &xdaq::Device::get_status)
