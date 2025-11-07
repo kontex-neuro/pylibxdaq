@@ -21,8 +21,6 @@ endif()
 
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost 1.81.0 REQUIRED COMPONENTS program_options system filesystem)
 find_package(fmt REQUIRED)
 find_package(Python3 COMPONENTS Interpreter Development)
 find_package(pybind11 REQUIRED)
