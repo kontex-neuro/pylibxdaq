@@ -64,11 +64,8 @@ jobs:
       - name: Conan setup
         run: |
           conan config install .github/conan_profiles/${{ env.OS_ARCH }} -tf profiles
-
-      - name: Install libxdaq
-        run: |
-          git submodule update --init --recursive
-          conan create libxdaq-dist --profile:all ${{ env.OS_ARCH }} -s build_type=Release --build=missing
+          git clone https://github.com/kontex-neuro/kontex-conan.git kontex-conan
+          conan remote add --force kontex-neuro ./kontex-conan
 
       - name: Build and install pylibxdaq
         working-directory: ./pylibxdaq
