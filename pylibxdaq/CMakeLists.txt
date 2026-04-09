@@ -22,13 +22,15 @@ endif()
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
 find_package(fmt REQUIRED)
-find_package(Python3 COMPONENTS Interpreter Development)
-find_package(pybind11 REQUIRED)
+find_package(Python COMPONENTS Interpreter Development)
+find_package(nanobind REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(xdaq REQUIRED)
+find_package(nlohmann_json)
 
+option(BUILD_TESTS "Build test modules" ON)
 
-pybind11_add_module(pyxdaq_device pyxdaq_device.cc)
+nanobind_add_module(pyxdaq_device pyxdaq_device.cc)
 target_link_libraries(pyxdaq_device PRIVATE
     xdaq::xdaq_device
     spdlog::spdlog
@@ -36,6 +38,26 @@ target_link_libraries(pyxdaq_device PRIVATE
 set_property(TARGET pyxdaq_device PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_compile_features(pyxdaq_device PRIVATE cxx_std_23)
 
+nanobind_add_stub(pyxdaq_device_stub
+    MODULE pyxdaq_device
+    OUTPUT pyxdaq_device.pyi
+)
+
+if(BUILD_TESTS)
+    add_library(mock_device_manager SHARED tests/test_device_manager.cc)
+    target_link_libraries(mock_device_manager PRIVATE
+        xdaq::xdaq_device
+        spdlog::spdlog
+        fmt::fmt
+        nlohmann_json::nlohmann_json
+    )
+    set_property(TARGET mock_device_manager PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET mock_device_manager PROPERTY PREFIX "")
+    set_property(TARGET mock_device_manager PROPERTY OUTPUT_NAME "mock_device_manager")
+    target_compile_features(mock_device_manager PRIVATE cxx_std_23)
+endif()
+
 install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR} DESTINATION .)
 install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION .)
 install(TARGETS pyxdaq_device DESTINATION .)
+install(FILES pyxdaq_device.pyi DESTINATION .)

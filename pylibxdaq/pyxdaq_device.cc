@@ -1,10 +1,13 @@
 #include <fmt/format.h>
-#include <pybind11/functional.h>
-#include <pybind11/gil.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/pytypes.h>
-#include <pybind11/stl.h>
-#include <pybind11/stl/filesystem.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+#include <nanobind/stl/filesystem.h>
+#include <nanobind/stl/function.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/shared_ptr.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/unique_ptr.h>
+#include <nanobind/trampoline.h>
 #include <spdlog/spdlog.h>
 #include <xdaq/data_streams.h>
 #include <xdaq/device.h>
@@ -16,198 +19,325 @@
 #include <string>
 #include <type_traits>
 
-
-namespace py = pybind11;
-
-using std::string;
+namespace nb = nanobind;
+using namespace nb::literals;
 
 namespace pyxdaq
 {
-class PyDataStream : public xdaq::Device::DataStream
-{
-public:
-    virtual void stop() override { PYBIND11_OVERLOAD(void, xdaq::Device::DataStream, stop); }
-};
 
 class PyDevice : public xdaq::Device
 {
 public:
     using Device = xdaq::Device;
 
-    virtual return_t set_register_sync(
+    NB_TRAMPOLINE(Device, 11);
+
+    return_t set_register_sync(
         addr_t addr, value_t value, value_t mask = value_mask
     ) noexcept override
     {
-        PYBIND11_OVERLOAD(return_t, Device, set_register_sync, addr, value, mask);
-    }
-    virtual return_t set_register(
-        addr_t addr, value_t value, value_t mask = value_mask
-    ) noexcept override
-    {
-        PYBIND11_OVERLOAD_PURE(return_t, Device, set_register, addr, value, mask);
-    }
-    virtual return_t send_registers() noexcept override
-    {
-        PYBIND11_OVERLOAD_PURE(return_t, Device, send_registers);
-    }
-    virtual std::optional<value_t> get_register_sync(addr_t addr) noexcept override
-    {
-        PYBIND11_OVERLOAD(std::optional<value_t>, Device, get_register_sync, addr);
-    }
-    virtual value_t get_register(addr_t addr) noexcept override
-    {
-        PYBIND11_OVERLOAD_PURE(value_t, Device, get_register, addr);
-    }
-    virtual return_t read_registers() noexcept override
-    {
-        PYBIND11_OVERLOAD_PURE(return_t, Device, read_registers);
+        NB_OVERRIDE(set_register_sync, addr, value, mask);
     }
 
-    virtual return_t trigger(addr_t addr, int bit) noexcept override
+    return_t set_register(addr_t addr, value_t value, value_t mask = value_mask) noexcept override
     {
-        PYBIND11_OVERLOAD_PURE(return_t, Device, trigger, addr, bit);
+        NB_OVERRIDE_PURE(set_register, addr, value, mask);
     }
 
-    virtual std::size_t write(
-        addr_t addr, std::size_t length, const unsigned char *data
-    ) noexcept override
+    return_t send_registers() noexcept override { NB_OVERRIDE_PURE(send_registers); }
+
+    std::optional<value_t> get_register_sync(addr_t addr) noexcept override
     {
-        PYBIND11_OVERLOAD_PURE(std::size_t, Device, write, addr, length, data);
+        NB_OVERRIDE(get_register_sync, addr);
     }
 
-    virtual std::size_t read(addr_t addr, std::size_t length, unsigned char *data) noexcept override
+    value_t get_register(addr_t addr) noexcept override { NB_OVERRIDE_PURE(get_register, addr); }
+
+    return_t read_registers() noexcept override { NB_OVERRIDE_PURE(read_registers); }
+
+    return_t trigger(addr_t addr, int bit) noexcept override
     {
-        PYBIND11_OVERLOAD_PURE(std::size_t, Device, read, addr, length, data);
+        NB_OVERRIDE_PURE(trigger, addr, bit);
     }
 
-    virtual std::optional<std::string> get_status() override
+    std::size_t write(addr_t addr, std::size_t length, const unsigned char *data) noexcept override
     {
-        PYBIND11_OVERLOAD(std::optional<std::string>, Device, get_status);
+        NB_OVERRIDE_PURE(write, addr, length, data);
     }
 
-    virtual std::optional<std::string> get_info() override
+    std::size_t read(addr_t addr, std::size_t length, unsigned char *data) noexcept override
     {
-        PYBIND11_OVERLOAD(std::optional<std::string>, Device, get_info);
+        NB_OVERRIDE_PURE(read, addr, length, data);
     }
+
+    std::expected<std::string, std::string> get_status() override { NB_OVERRIDE_PURE(get_status); }
+
+    std::expected<std::string, std::string> get_info() override { NB_OVERRIDE_PURE(get_info); }
+
+    std::unique_ptr<xdaq::Device::DataStream> start_read_stream(
+        addr_t addr, xdaq::DataStream::receive_callback &&callback, std::size_t chunk_size
+    ) override
+    {
+        NB_OVERRIDE_PURE(start_read_stream, addr, std::move(callback), chunk_size);
+    }
+};
+
+struct DeviceHandle {
+    std::shared_ptr<xdaq::Device> device;
+
+    explicit DeviceHandle(std::shared_ptr<xdaq::Device> d) : device(std::move(d)) {}
+
+    void check() const
+    {
+        if (!device) throw nb::value_error("Device is already closed");
+    }
+
+    void close() noexcept { device.reset(); }
+
+    bool is_closed() const noexcept { return !device; }
+};
+
+struct ManagedBuffer {
+    std::unique_ptr<unsigned char[], void (*)(unsigned char *)> data;
+    std::size_t size;
+    std::shared_ptr<xdaq::Device> device; // Keeps the DLL alive until the buffer is safely GC'd
+};
+
+struct DataView {
+    std::span<unsigned char> data;
+};
+
+struct DataStreamHandle {
+    std::shared_ptr<xdaq::Device::DataStream> stream;
+
+    explicit DataStreamHandle(std::shared_ptr<xdaq::Device::DataStream> s) : stream(std::move(s)) {}
+
+    ~DataStreamHandle()
+    {
+        nb::gil_scoped_release release;
+        stream.reset();
+    }
+
+    void check() const
+    {
+        if (!stream) throw nb::value_error("DataStream is already stopped");
+    }
+
+    void stop() noexcept
+    {
+        if (stream) {
+            stream->stop();
+        }
+    }
+
+    void wait_stop()
+    {
+        if (stream) {
+            stream->wait_stop();
+            stream.reset();
+        }
+    }
+
+    bool is_stopped() const noexcept { return !stream; }
 };
 
 }  // namespace pyxdaq
 
-PYBIND11_MODULE(pyxdaq_device, m)
+NB_MODULE(pyxdaq_device, m)
 {
     m.doc() = "Python binding for XDAQ Device";
 
-    py::enum_<xdaq::Device::return_t>(m, "ReturnCode")
+    nb::enum_<xdaq::Device::return_t>(m, "ReturnCode")
         .value("Success", xdaq::Device::return_t::Success)
         .value("Failure", xdaq::Device::return_t::Failure);
 
-    py::class_<
-        xdaq::Device::DataStream,
-        pyxdaq::PyDataStream,
-        std::unique_ptr<xdaq::Device::DataStream>>(m, "DataStream")
-        .def("stop", &xdaq::Device::DataStream::stop, py::call_guard<py::gil_scoped_release>())
-        .def("__enter__", [](xdaq::Device::DataStream &s) { return &s; })
-        .def(
-            "__exit__",
-            [](xdaq::Device::DataStream &s,
-               const std::optional<pybind11::type> &exc_type,
-               const std::optional<pybind11::object> &exc_value,
-               const std::optional<pybind11::object> &traceback) { s.stop(); },
-            py::call_guard<py::gil_scoped_release>()
-        );
-
-    struct ManagedBuffer {
-        std::unique_ptr<unsigned char[], void (*)(unsigned char *)> data;
-        std::size_t size;
-    };
-
-    struct DataView {
-        std::span<unsigned char> data;
-    };
-
-    py::class_<ManagedBuffer, std::unique_ptr<ManagedBuffer>>(
-        m, "ManagedBuffer", py::buffer_protocol()
-    )
-        .def_buffer([](ManagedBuffer &b) -> py::buffer_info {
-            return py::buffer_info(
-                b.data.get(),
-                sizeof(unsigned char),
-                py::format_descriptor<unsigned char>::format(),
-                1,
-                {b.size},
-                {sizeof(unsigned char)}
-            );
-        });
-
-    py::class_<DataView, std::unique_ptr<DataView>>(m, "DataView", py::buffer_protocol())
-        .def_buffer([](DataView &b) -> py::buffer_info {
-            return py::buffer_info(
-                b.data.data(),
-                sizeof(unsigned char),
-                py::format_descriptor<unsigned char>::format(),
-                1,
-                {b.data.size()},
-                {sizeof(unsigned char)}
-            );
-        });
-
-
-    py::class_<
-        xdaq::Device,
-        pyxdaq::PyDevice,
-        std::unique_ptr<xdaq::Device, xdaq::DeviceManager::device_deleter>>(m, "Device")
-        .def(py::init<>())
+    nb::class_<pyxdaq::DataStreamHandle>(m, "DataStream")
         .def(
             "__repr__",
-            [](const xdaq::Device &d) {
-                return fmt::format("<pyxdaq_device.Device at {}>", static_cast<const void *>(&d));
+            [](const pyxdaq::DataStreamHandle &h) {
+                if (h.is_stopped()) return std::string("<DataStream stopped>");
+                return fmt::format(
+                    "<DataStream stream={}>", static_cast<const void *>(h.stream.get())
+                );
             }
         )
-        .def("set_register_sync", &xdaq::Device::set_register_sync)
-        .def("set_register", &xdaq::Device::set_register)
-        .def("send_registers", &xdaq::Device::send_registers)
-        .def("get_register_sync", &xdaq::Device::get_register_sync)
-        .def("get_register", &xdaq::Device::get_register)
-        .def("read_registers", &xdaq::Device::read_registers)
-        .def("trigger", &xdaq::Device::trigger)
+        .def_prop_ro("stopped", &pyxdaq::DataStreamHandle::is_stopped)
+        .def("stop", &pyxdaq::DataStreamHandle::stop, nb::call_guard<nb::gil_scoped_release>())
+        .def(
+            "__enter__",
+            [](pyxdaq::DataStreamHandle &h) -> pyxdaq::DataStreamHandle & {
+                h.check();
+                return h;
+            }, nb::rv_policy::reference
+        )
+        .def(
+            "__exit__",
+            [](pyxdaq::DataStreamHandle &h,
+               std::optional<nb::object>,
+               std::optional<nb::object>,
+               std::optional<nb::object>) { h.wait_stop(); },
+            nb::call_guard<nb::gil_scoped_release>()
+        );
+
+
+    nb::class_<pyxdaq::ManagedBuffer>(m, "ManagedBuffer")
+        .def_prop_ro("size", [](const pyxdaq::ManagedBuffer &b) { return b.size; })
+        .def_prop_ro("numpy", [](nb::object obj) {
+            auto &b = nb::cast<pyxdaq::ManagedBuffer &>(obj);
+            size_t shape[1] = {b.size};
+            // By passing `obj`, nanobind increments the refcount of the Python ManagedBuffer object
+            // ensuring the C++ struct (and its shared_ptr to the DLL) stays alive 
+            // as long as the user holds the NumPy array in Python!
+            return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(b.data.get(), 1, shape, obj);
+        });
+
+
+    nb::class_<pyxdaq::DataView>(m, "DataView")
+        .def_prop_ro("size", [](const pyxdaq::DataView &b) { return b.data.size(); })
+        .def_prop_ro("numpy", [](nb::object obj) {
+            auto &b = nb::cast<pyxdaq::DataView &>(obj);
+            size_t shape[1] = {b.data.size()};
+            // Same here, pins the DataView python object while the numpy array exists.
+            return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(b.data.data(), 1, shape, obj);
+        });
+
+    nb::class_<xdaq::Device, pyxdaq::PyDevice>(m, "Device").def(nb::init<>());
+
+    nb::class_<pyxdaq::DeviceHandle>(m, "DeviceHandle")
+        .def(
+            "__repr__",
+            [](const pyxdaq::DeviceHandle &h) {
+                if (h.is_closed()) return std::string("<DeviceHandle closed>");
+                return fmt::format(
+                    "<DeviceHandle device={}>", static_cast<const void *>(h.device.get())
+                );
+            }
+        )
+        .def_prop_ro("closed", &pyxdaq::DeviceHandle::is_closed)
+
+        .def("close", &pyxdaq::DeviceHandle::close)
+
+        .def(
+            "__enter__",
+            [](pyxdaq::DeviceHandle &h) -> pyxdaq::DeviceHandle & {
+                h.check();
+                return h;
+            }, nb::rv_policy::reference
+        )
+        .def(
+            "__exit__",
+            [](pyxdaq::DeviceHandle &h, std::optional<nb::object>, std::optional<nb::object>, std::optional<nb::object>) { h.close(); }
+        )
+
+        .def(
+            "set_register_sync",
+            [](pyxdaq::DeviceHandle &h,
+               xdaq::Device::addr_t addr,
+               xdaq::Device::value_t value,
+               xdaq::Device::value_t mask) {
+                h.check();
+                return h.device->set_register_sync(addr, value, mask);
+            },
+            "addr"_a,
+            "value"_a,
+            "mask"_a = xdaq::Device::value_mask
+        )
+        .def(
+            "set_register",
+            [](pyxdaq::DeviceHandle &h,
+               xdaq::Device::addr_t addr,
+               xdaq::Device::value_t value,
+               xdaq::Device::value_t mask) {
+                h.check();
+                return h.device->set_register(addr, value, mask);
+            },
+            "addr"_a,
+            "value"_a,
+            "mask"_a = xdaq::Device::value_mask
+        )
+        .def(
+            "send_registers",
+            [](pyxdaq::DeviceHandle &h) {
+                h.check();
+                return h.device->send_registers();
+            }
+        )
+        .def(
+            "get_register_sync",
+            [](pyxdaq::DeviceHandle &h, xdaq::Device::addr_t addr) {
+                h.check();
+                return h.device->get_register_sync(addr);
+            },
+            "addr"_a
+        )
+        .def(
+            "get_register",
+            [](pyxdaq::DeviceHandle &h, xdaq::Device::addr_t addr) {
+                h.check();
+                return h.device->get_register(addr);
+            },
+            "addr"_a
+        )
+        .def(
+            "read_registers",
+            [](pyxdaq::DeviceHandle &h) {
+                h.check();
+                return h.device->read_registers();
+            }
+        )
+        .def(
+            "trigger",
+            [](pyxdaq::DeviceHandle &h, xdaq::Device::addr_t addr, int bit) {
+                h.check();
+                return h.device->trigger(addr, bit);
+            },
+            "addr"_a,
+            "bit"_a
+        )
         .def(
             "write",
-            [](xdaq::Device &d, std::uint32_t addr, py::buffer b) {
-                auto info = b.request();
-                if (info.ndim != 1) throw std::runtime_error("ndim != 1");
-                if (info.format != py::format_descriptor<std::uint8_t>::format())
-                    throw std::runtime_error("Unsupported buffer format!");
-                if (info.strides[0] != 1) throw std::runtime_error("strides[0] != 1");
-                return d.write(addr, info.size, (unsigned char *) info.ptr);
-            }
+            [](pyxdaq::DeviceHandle &h,
+               std::uint32_t addr,
+               nb::ndarray<uint8_t, nb::ndim<1>, nb::c_contig>
+                   arr) {
+                h.check();
+                return h.device->write(
+                    addr, arr.size(), reinterpret_cast<unsigned char *>(arr.data())
+                );
+            },
+            "addr"_a,
+            "data"_a
         )
         .def(
             "read",
-            [](xdaq::Device &d, std::uint32_t addr, py::buffer b) {
-                auto info = b.request();
-                if (info.readonly) throw std::runtime_error("buffer is readonly");
-                if (info.ndim != 1) throw std::runtime_error("ndim != 1");
-                if (info.format != py::format_descriptor<std::uint8_t>::format())
-                    throw std::runtime_error("Unsupported buffer format!");
-                if (info.strides[0] != 1) throw std::runtime_error("strides[0] != 1");
-                return d.read(addr, info.size, (unsigned char *) info.ptr);
-            }
+            [](pyxdaq::DeviceHandle &h,
+               std::uint32_t addr,
+               nb::ndarray<uint8_t, nb::ndim<1>, nb::c_contig>
+                   arr) {
+                h.check();
+                return h.device->read(
+                    addr, arr.size(), reinterpret_cast<unsigned char *>(arr.data())
+                );
+            },
+            "addr"_a,
+            "buf"_a
         )
         .def(
             "start_read_stream",
-            [](xdaq::Device &d,
+            [](pyxdaq::DeviceHandle &h,
                std::uint32_t addr,
-               std::function<void(std::optional<ManagedBuffer> b, std::optional<std::string> error)>
+               std::function<void(std::optional<pyxdaq::ManagedBuffer>, std::optional<std::string>)>
                    callback,
-               std::size_t chunk_size = 0,
-               std::size_t max_queue_elements =
-                   4096) -> std::optional<std::unique_ptr<xdaq::Device::DataStream>> {
-                return d.start_read_stream(
+               std::size_t chunk_size,
+               std::size_t max_queue_elements) -> std::optional<pyxdaq::DataStreamHandle> {
+                h.check();
+                auto stream = h.device->start_read_stream(
                     addr,
                     xdaq::DataStream::queue(
-                        [callback = std::move(callback)](auto &&event) {
+                        [callback = std::move(callback), dev = h.device](auto &&event) {
+                            nb::gil_scoped_acquire gil; // <--- Must hold GIL when background thread calls Python callback!
                             std::visit(
-                                [&callback](auto &&event) {
+                                [&callback, dev](auto &&event) {
                                     using T = std::decay_t<decltype(event)>;
                                     using namespace xdaq::DataStream;
                                     if constexpr (std::is_same_v<T, Events::DataView>) {
@@ -215,9 +345,10 @@ PYBIND11_MODULE(pyxdaq_device, m)
                                     } else if constexpr (std::is_same_v<T, Events::OwnedData>) {
                                         try {
                                             callback(
-                                                ManagedBuffer{
+                                                pyxdaq::ManagedBuffer{
                                                     .data = std::move(event.buffer),
-                                                    .size = event.length
+                                                    .size = event.length,
+                                                    .device = dev // <--- Safely capture the device shared_ptr from the Handle!
                                                 },
                                                 std::nullopt
                                             );
@@ -225,9 +356,9 @@ PYBIND11_MODULE(pyxdaq_device, m)
                                             spdlog::error("Error in callback: {}", e.what());
                                         }
                                     } else if constexpr (std::is_same_v<T, Events::Stop>) {
-                                        callback(std::nullopt, std::nullopt);
+                                        try { callback(std::nullopt, std::nullopt); } catch(const std::exception& e) {}
                                     } else if constexpr (std::is_same_v<T, Events::Error>) {
-                                        callback(std::nullopt, event.error);
+                                        try { callback(std::nullopt, event.error); } catch(const std::exception& e) {}
                                     } else {
                                         static_assert(
                                             xdaq::always_false_v<T>, "non-exhaustive visitor"
@@ -243,37 +374,43 @@ PYBIND11_MODULE(pyxdaq_device, m)
                     ),
                     chunk_size
                 );
+                if (stream == nullptr) return std::nullopt;
+                return pyxdaq::DataStreamHandle{{
+                    stream.release(),
+                    [dev = h.device](xdaq::Device::DataStream *p) { delete p; },
+                }};
             },
-            py::arg("addr"),
-            py::arg("callback"),
-            py::kw_only(),
-            py::arg("chunk_size") = 0,
-            py::arg("max_queue_elements") = 4096,
-            py::return_value_policy::move
+            "addr"_a,
+            "callback"_a,
+            nb::kw_only(),
+            "chunk_size"_a = 0,
+            "max_queue_elements"_a = 4096
         )
         .def(
             "start_aligned_read_stream",
-            [](xdaq::Device &d,
+            [](pyxdaq::DeviceHandle &h,
                std::uint32_t addr,
                std::size_t alignment,
-               std::function<void(std::optional<DataView> b, std::optional<std::string> error)>
+               std::function<void(std::optional<pyxdaq::DataView>, std::optional<std::string>)>
                    callback,
-               std::size_t chunk_size = 0,
-               std::size_t max_queue_elements =
-                   4096) -> std::optional<std::unique_ptr<xdaq::Device::DataStream>> {
-                return d.start_read_stream(
+               std::size_t chunk_size,
+               std::size_t max_queue_elements) -> std::optional<pyxdaq::DataStreamHandle> {
+                h.check();
+                auto stream = h.device->start_read_stream(
                     addr,
                     xdaq::DataStream::queue(
                         xdaq::DataStream::aligned_read_stream(
-                            [callback = std::move(callback)](auto &&event) {
+                            [callback = std::move(callback), dev = h.device](auto &&event) {
+                                nb::gil_scoped_acquire gil; // <--- Must hold GIL when background thread calls Python callback!
                                 std::visit(
-                                    [&callback](auto &&event) {
+                                    [&callback, dev](auto &&event) {
                                         using T = std::decay_t<decltype(event)>;
                                         using namespace xdaq::DataStream;
                                         if constexpr (std::is_same_v<T, Events::DataView>) {
                                             try {
                                                 callback(
-                                                    DataView{.data = event.data}, std::nullopt
+                                                    pyxdaq::DataView{.data = event.data},
+                                                    std::nullopt
                                                 );
                                             } catch (const std::exception &e) {
                                                 spdlog::error("Error in callback: {}", e.what());
@@ -281,7 +418,7 @@ PYBIND11_MODULE(pyxdaq_device, m)
                                         } else if constexpr (std::is_same_v<T, Events::OwnedData>) {
                                             try {
                                                 callback(
-                                                    DataView{
+                                                    pyxdaq::DataView{
                                                         .data = {event.buffer.get(), event.length}
                                                     },
                                                     std::nullopt
@@ -290,9 +427,9 @@ PYBIND11_MODULE(pyxdaq_device, m)
                                                 spdlog::error("Error in callback: {}", e.what());
                                             }
                                         } else if constexpr (std::is_same_v<T, Events::Stop>) {
-                                            callback(std::nullopt, std::nullopt);
+                                            try { callback(std::nullopt, std::nullopt); } catch(const std::exception& e) {}
                                         } else if constexpr (std::is_same_v<T, Events::Error>) {
-                                            callback(std::nullopt, event.error);
+                                            try { callback(std::nullopt, event.error); } catch(const std::exception& e) {}
                                         } else {
                                             static_assert(
                                                 xdaq::always_false_v<T>, "non-exhaustive visitor"
@@ -310,19 +447,42 @@ PYBIND11_MODULE(pyxdaq_device, m)
                     ),
                     chunk_size
                 );
+                if (stream == nullptr) return std::nullopt;
+                return pyxdaq::DataStreamHandle{{
+                    stream.release(),
+                    [dev = h.device](xdaq::Device::DataStream *p) { delete p; },
+                }};
             },
-            py::arg("addr"),
-            py::arg("alignment"),
-            py::arg("callback"),
-            py::kw_only(),
-            py::arg("chunk_size") = 0,
-            py::arg("max_queue_elements") = 4096,
-            py::return_value_policy::move
+            "addr"_a,
+            "alignment"_a,
+            "callback"_a,
+            nb::kw_only(),
+            "chunk_size"_a = 0,
+            "max_queue_elements"_a = 4096
         )
-        .def("get_status", &xdaq::Device::get_status)
-        .def("get_info", &xdaq::Device::get_info);
+        .def(
+            "get_status",
+            [](pyxdaq::DeviceHandle &h) {
+                h.check();
+                auto result = h.device->get_status();
+                if (!result) throw std::runtime_error(result.error());
+                return *result;
+            }
+        )
+        .def("get_info", [](pyxdaq::DeviceHandle &h) {
+            h.check();
+            auto result = h.device->get_info();
+            if (!result) throw std::runtime_error(result.error());
+            return *result;
+        });
 
-    py::class_<xdaq::DeviceManager, std::shared_ptr<xdaq::DeviceManager>>(m, "DeviceManager")
+    nb::class_<xdaq::DeviceManager>(m, "DeviceManager")
+        .def(
+            "__repr__",
+            [](const xdaq::DeviceManager &d) {
+                return fmt::format("<DeviceManager at {}>", static_cast<const void *>(&d));
+            }
+        )
         .def("info", [](const xdaq::DeviceManager &d) { return d.info(); })
         .def("location", [](const xdaq::DeviceManager &d) { return d.location(); })
         .def("list_devices", [](const xdaq::DeviceManager &d) { return d.list_devices(); })
@@ -330,10 +490,17 @@ PYBIND11_MODULE(pyxdaq_device, m)
             "get_device_options",
             [](const xdaq::DeviceManager &d) { return d.get_device_options(); }
         )
-        .def("create_device", [](xdaq::DeviceManager &d, const std::string &device) {
-            py::gil_scoped_release release;
-            return d.create_device(device);
-        });
+        .def(
+            "create_device",
+            [](std::shared_ptr<xdaq::DeviceManager> d, const std::string &config) {
+                auto dev = d->create_device(config);
+                // keep dll alive until device destruction by capturing manager's shared_ptr
+                return pyxdaq::DeviceHandle{{
+                    dev.release(),
+                    [d](xdaq::Device *p) { delete p; },
+                }};
+            }
+        );
 
     m.def("get_device_manager", &xdaq::get_device_manager);
 }
