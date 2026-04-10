@@ -22,7 +22,9 @@ endif()
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
 find_package(fmt REQUIRED)
-find_package(Python COMPONENTS Interpreter Development)
+find_package(Python
+    REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule
+)
 find_package(nanobind REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(xdaq REQUIRED)
@@ -30,7 +32,11 @@ find_package(nlohmann_json)
 
 option(BUILD_TESTS "Build test modules" ON)
 
-nanobind_add_module(pyxdaq_device pyxdaq_device.cc)
+nanobind_add_module(pyxdaq_device
+    STABLE_ABI
+    pyxdaq_device.cc
+)
+
 target_link_libraries(pyxdaq_device PRIVATE
     xdaq::xdaq_device
     spdlog::spdlog

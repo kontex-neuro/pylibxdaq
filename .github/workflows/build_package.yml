@@ -15,7 +15,7 @@ jobs:
             { os: macos-15, arch: arm64 },
             { os: ubuntu-24.04, arch: x64 }
           ]
-        py: ["3.11", "3.12", "3.13"]
+        py: ["3.12"]
 
     runs-on: ${{ matrix.os_arch.os }}
 
@@ -98,5 +98,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.OS_ARCH }}-${{ matrix.py }}
+          name: ${{ env.OS_ARCH }}
           path: dist/*.whl
