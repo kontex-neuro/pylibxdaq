@@ -28,7 +28,7 @@ jobs:
           python-version: ${{ matrix.py }}
 
       - name: Install build tools
-        run: pip install conan ninja build twine pybind11_stubgen==2.5.3 typing_extensions
+        run: pip install conan ninja build twine pybind11_stubgen==2.5.3 typing_extensions pytest numpy
 
       - name: Install build tools (Ubuntu)
         if: matrix.os_arch.os == 'ubuntu-24.04'
@@ -77,6 +77,11 @@ jobs:
       - name: Build package
         run: |
           python -m build -w
+
+      - name: Run tests
+        run: |
+          pip install $(find dist -name '*.whl')
+          pytest tests --log-cli-level=INFO
 
       - name: Fix binary and upload (Ubuntu)
         if: matrix.os_arch.os == 'ubuntu-24.04'
