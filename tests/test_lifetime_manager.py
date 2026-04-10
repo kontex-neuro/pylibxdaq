@@ -53,10 +53,10 @@ def test_cpython_immediate_dealloc(mock_manager_path, capfd):
     gc.disable()
     try:
         manager = pyxdaq_device.get_device_manager(mock_manager_path)
-        
+
         info = json.loads(manager.info())
         assert info["name"] == "Mock Device Manager"
-        
+
         captured = capfd.readouterr()
         assert "MockDeviceManager constructed" in captured.err
         assert "MockDeviceManager destroyed" not in captured.err

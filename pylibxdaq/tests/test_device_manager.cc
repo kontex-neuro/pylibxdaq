@@ -155,6 +155,7 @@ struct MockDeviceManager final : public xdaq::DeviceManager {
 
     ~MockDeviceManager() override
     {
+        instance_count--;
         fmt::println(
             stderr,
             "MockDeviceManager destroyed {} (total instances: {})",
