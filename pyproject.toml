@@ -27,3 +27,9 @@ line_length = 100
 
 [project.urls]
 Homepage = "https://github.com/kontex-neuro/pylibxdaq"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-benchmark==5.2.3",
+]
