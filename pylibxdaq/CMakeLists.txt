@@ -41,7 +41,13 @@ target_compile_features(pyxdaq_device PRIVATE cxx_std_23)
 nanobind_add_stub(pyxdaq_device_stub
     MODULE pyxdaq_device
     OUTPUT pyxdaq_device.pyi
+    DEPENDS pyxdaq_device
 )
+
+install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR} DESTINATION .)
+install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION .)
+install(TARGETS pyxdaq_device DESTINATION .)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/pyxdaq_device.pyi DESTINATION .)
 
 if(BUILD_TESTS)
     add_library(mock_device_manager SHARED tests/test_device_manager.cc)
@@ -56,8 +62,3 @@ if(BUILD_TESTS)
     set_property(TARGET mock_device_manager PROPERTY OUTPUT_NAME "mock_device_manager")
     target_compile_features(mock_device_manager PRIVATE cxx_std_23)
 endif()
-
-install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR} DESTINATION .)
-install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION .)
-install(TARGETS pyxdaq_device DESTINATION .)
-install(FILES pyxdaq_device.pyi DESTINATION .)
