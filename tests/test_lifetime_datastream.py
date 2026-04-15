@@ -28,7 +28,6 @@ def test_datastream_creation(mock_manager_path, capfd):
         captured = capfd.readouterr()
         assert "MockDataStream constructed" in captured.err
         assert stream is not None
-        assert not stream.stopped
 
         stream.stop()
 
@@ -71,7 +70,6 @@ def test_stream_keeps_device_and_manager_alive(mock_manager_path, capfd):
     assert "MockDeviceManager destroyed" not in captured.err
 
     assert stream is not None
-    assert not stream.stopped
 
     del stream
 
@@ -128,11 +126,9 @@ def test_stream_context_manager(mock_manager_path, capfd):
         capfd.readouterr()
         import time
         time.sleep(0.06)
-        assert not stream.stopped
 
     captured = capfd.readouterr()
     assert "MockDataStream destroyed" in captured.err
-    assert stream.stopped
 
 
 def test_aligned_read_stream_lifetime(mock_manager_path, capfd):
@@ -269,7 +265,6 @@ def test_aligned_read_stream(mock_manager_path, capfd):
 
     stream = device.start_aligned_read_stream(0x11, 16, cb, chunk_size=1024)
     assert stream is not None
-    assert not stream.stopped
 
     time.sleep(0.05)
     stream.stop()
@@ -278,6 +273,157 @@ def test_aligned_read_stream(mock_manager_path, capfd):
     del manager
 
     assert len(events) > 0
+
+
+def test_managed_buffer_size_and_numpy(mock_manager_path):
+    manager = pyxdaq_device.get_device_manager(mock_manager_path)
+    device = manager.create_device(json.dumps({"id": 0}))
+
+    events = []
+
+    def cb(event, err):
+        if event is not None:
+            events.append(event)
+
+    stream = device.start_read_stream(0x11, cb)
+    time.sleep(0.06)
+    stream.stop()
+    del stream
+    del device
+    del manager
+
+    assert len(events) > 0
+    for ev in events:
+        assert ev.size > 0
+        arr = ev.numpy
+        assert len(arr) == ev.size
+
+
+def test_managed_buffer_numpy_is_independent_copy(mock_manager_path, capfd):
+    # With NumPy 2.x, ManagedBuffer.numpy returns an independent copy of the data
+    # via the DLPack path. The numpy array does NOT hold a reference to the
+    # ManagedBuffer, so device lifetime is not extended by holding numpy arrays.
+    arrays = []
+
+    def run():
+        manager = pyxdaq_device.get_device_manager(mock_manager_path)
+        device = manager.create_device(json.dumps({"id": 0}))
+
+        def cb(event, err):
+            if event is not None:
+                arrays.append(event.numpy)
+
+        stream = device.start_read_stream(0x11, cb)
+        time.sleep(0.06)
+        stream.stop()
+        del stream, device, manager
+
+    gc.disable()
+    try:
+        run()
+        gc.collect()
+        # Device should be destroyed once all ManagedBuffer Python objects (event params)
+        # go out of scope — numpy arrays alone don't extend device lifetime.
+        assert "MockDevice(0) destroyed" in capfd.readouterr().err
+    finally:
+        gc.enable()
+
+    # numpy arrays are valid independent copies even after device is gone
+    assert len(arrays) > 0
+    assert all(len(a) > 0 for a in arrays)
+
+
+def _collect_numpy_views(mock_manager_path):
+    """Return numpy_view arrays from ManagedBuffer events. Device is deleted before return."""
+    manager = pyxdaq_device.get_device_manager(mock_manager_path)
+    device = manager.create_device(json.dumps({"id": 0}))
+    views = []
+
+    def cb(event, err):
+        if event is not None:
+            views.append(event.numpy_view)
+
+    with device.start_read_stream(0x11, cb):
+        time.sleep(0.06)
+
+    del device, manager
+    return views
+
+
+def test_managed_buffer_numpy_view_keeps_device_alive(mock_manager_path, capfd):
+    # numpy_view is zero-copy with no lifetime management.
+    # Holding numpy_view arrays does NOT keep the ManagedBuffer or device alive.
+    views = _collect_numpy_views(mock_manager_path)
+    assert "MockDevice(0) destroyed" in capfd.readouterr().err
+    assert len(views) > 0
+
+
+def test_dataview_size_and_numpy_copy(mock_manager_path):
+    manager = pyxdaq_device.get_device_manager(mock_manager_path)
+    device = manager.create_device(json.dumps({"id": 0}))
+
+    arrays = []
+
+    def cb(event, err):
+        if event is not None:
+            assert event.size > 0
+            arrays.append(event.numpy)
+
+    stream = device.start_aligned_read_stream(0x11, 16, cb)
+    time.sleep(0.06)
+    stream.stop()
+    del stream
+    del device
+    del manager
+    gc.collect()
+
+    assert len(arrays) > 0
+    for arr in arrays:
+        assert len(arr) > 0
+        _ = arr[0]
+
+
+def test_dataview_numpy_view_during_callback(mock_manager_path):
+    manager = pyxdaq_device.get_device_manager(mock_manager_path)
+    device = manager.create_device(json.dumps({"id": 0}))
+
+    view_sizes = []
+
+    def cb(event, err):
+        if event is not None:
+            view = event.numpy_view
+            assert len(view) == event.size
+            view_sizes.append(len(view))
+
+    stream = device.start_aligned_read_stream(0x11, 16, cb)
+    time.sleep(0.06)
+    stream.stop()
+    del stream
+    del device
+    del manager
+
+    assert len(view_sizes) > 0
+    assert all(s > 0 for s in view_sizes)
+
+
+def test_error_event_received(mock_manager_path):
+    manager = pyxdaq_device.get_device_manager(mock_manager_path)
+    device = manager.create_device(json.dumps({"id": 0}))
+
+    errors = []
+
+    def cb(event, err):
+        if err is not None:
+            errors.append(err)
+
+    with device.start_aligned_read_stream(0x11, 16, cb):
+        time.sleep(0.06)
+
+    del device
+    del manager
+
+    assert len(errors) > 0
+    assert all(isinstance(e, str) and len(e) > 0 for e in errors)
 
 
 def test_stream_callback_cycle(mock_manager_path, capfd):

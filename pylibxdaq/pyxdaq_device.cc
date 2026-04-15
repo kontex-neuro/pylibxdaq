@@ -93,7 +93,12 @@ NB_MODULE(pyxdaq_device, m)
         .value("Success", xdaq::Device::return_t::Success)
         .value("Failure", xdaq::Device::return_t::Failure);
 
-    nb::class_<pyxdaq::DataStreamHandle>(m, "DataStream")
+    nb::class_<pyxdaq::DataStreamHandle>(
+        m,
+        "DataStream",
+        "Handle to an active data stream. Must be used as a context manager to ensure clean "
+        "shutdown."
+    )
         .def(
             "__repr__",
             [](const pyxdaq::DataStreamHandle &h) {
@@ -103,8 +108,12 @@ NB_MODULE(pyxdaq_device, m)
                 );
             }
         )
-        .def_prop_ro("stopped", &pyxdaq::DataStreamHandle::is_stopped)
-        .def("stop", &pyxdaq::DataStreamHandle::stop, nb::call_guard<nb::gil_scoped_release>())
+        .def(
+            "stop",
+            &pyxdaq::DataStreamHandle::stop,
+            nb::call_guard<nb::gil_scoped_release>(),
+            "Signal the stream to stop. Non-blocking — use the context manager for clean shutdown."
+        )
         .def(
             "__enter__",
             [](pyxdaq::DataStreamHandle &h) -> pyxdaq::DataStreamHandle & {
@@ -126,28 +135,84 @@ NB_MODULE(pyxdaq_device, m)
         );
 
 
-    nb::class_<pyxdaq::ManagedBuffer>(m, "ManagedBuffer")
-        .def_prop_ro("size", [](const pyxdaq::ManagedBuffer &b) { return b.size; })
-        .def_prop_ro("numpy", [](nb::object obj) {
-            auto &b = nb::cast<pyxdaq::ManagedBuffer &>(obj);
-            size_t shape[1] = {b.size};
-            // By passing `obj`, nanobind increments the refcount of the Python ManagedBuffer object
-            // ensuring the C++ struct (and its shared_ptr to the DLL) stays alive
-            // as long as the user holds the NumPy array in Python!
-            return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(b.data.get(), 1, shape, obj);
-        });
+    nb::class_<pyxdaq::ManagedBuffer>(
+        m, "ManagedBuffer", "Owned data buffer delivered by start_read_stream."
+    )
+        .def_prop_ro(
+            "size",
+            [](const pyxdaq::ManagedBuffer &b) { return b.size; },
+            "Number of bytes in the buffer."
+        )
+        .def_prop_ro(
+            "numpy",
+            [](const pyxdaq::ManagedBuffer &b) {
+                // Safe copy: allocates a new buffer owned by the numpy array,
+                // so it remains valid even after the ManagedBuffer is destroyed.
+                auto *buf = new unsigned char[b.size];
+                std::copy(b.data.get(), b.data.get() + b.size, buf);
+                nb::capsule owner(buf, [](void *p) noexcept {
+                    delete[] static_cast<unsigned char *>(p);
+                });
+                size_t shape[1] = {b.size};
+                return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(buf, 1, shape, owner);
+            },
+            nb::rv_policy::automatic,
+            "Copy the buffer into a new numpy array. Safe to hold past the lifetime of this object."
+        )
+        .def_prop_ro(
+            "numpy_view",
+            [](const pyxdaq::ManagedBuffer &b) {
+                size_t shape[1] = {b.size};
+                return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(b.data.get(), 1, shape);
+            },
+            nb::rv_policy::reference,
+            "Zero-copy view into the buffer. Only safe to use while this object is alive."
+        );
 
 
-    nb::class_<pyxdaq::DataView>(m, "DataView")
-        .def_prop_ro("size", [](const pyxdaq::DataView &b) { return b.data.size(); })
-        .def_prop_ro("numpy", [](nb::object obj) {
-            auto &b = nb::cast<pyxdaq::DataView &>(obj);
-            size_t shape[1] = {b.data.size()};
-            // Same here, pins the DataView python object while the numpy array exists.
-            return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(b.data.data(), 1, shape, obj);
-        });
+    nb::class_<pyxdaq::DataView>(
+        m,
+        "DataView",
+        "Aligned data view delivered by start_aligned_read_stream. Only valid during the callback."
+    )
+        .def_prop_ro(
+            "size",
+            [](const pyxdaq::DataView &b) { return b.data.size(); },
+            "Number of bytes in the view."
+        )
+        .def_prop_ro(
+            "numpy",
+            [](const pyxdaq::DataView &b) {
+                // Safe copy: allocates a new buffer owned by the numpy array,
+                // so it remains valid even after the DataView is destroyed.
+                auto *buf = new unsigned char[b.data.size()];
+                std::copy(b.data.begin(), b.data.end(), buf);
+                nb::capsule owner(buf, [](void *p) noexcept {
+                    delete[] static_cast<unsigned char *>(p);
+                });
+                size_t shape[1] = {b.data.size()};
+                return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(buf, 1, shape, owner);
+            },
+            nb::rv_policy::automatic,
+            "Copy the view into a new numpy array. Safe to hold past the callback."
+        )
+        .def_prop_ro(
+            "numpy_view",
+            [](nb::object obj) {
+                auto &b = nb::cast<pyxdaq::DataView &>(obj);
+                size_t shape[1] = {b.data.size()};
+                // Zero-copy view. UNSAFE outside the callback — the span is only valid
+                // while the C++ DataView object is alive (i.e. during the callback).
+                return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(b.data.data(), 1, shape, obj);
+            },
+            "Zero-copy view into the data. Only safe to use within the callback; do not store."
+        );
 
-    nb::class_<pyxdaq::DeviceHandle>(m, "Device")
+    nb::class_<pyxdaq::DeviceHandle>(
+        m,
+        "Device",
+        "Handle to an open XDAQ device. Use as a context manager or call close() explicitly."
+    )
         .def(
             "__repr__",
             [](const pyxdaq::DeviceHandle &h) {
@@ -155,9 +220,17 @@ NB_MODULE(pyxdaq_device, m)
                 return fmt::format("<Device device={}>", static_cast<const void *>(h.device.get()));
             }
         )
-        .def_prop_ro("closed", &pyxdaq::DeviceHandle::is_closed)
+        .def_prop_ro(
+            "closed", &pyxdaq::DeviceHandle::is_closed, "True if the device has been closed."
+        )
 
-        .def("close", &pyxdaq::DeviceHandle::close, nb::call_guard<nb::gil_scoped_release>())
+        .def(
+            "close",
+            &pyxdaq::DeviceHandle::close,
+            nb::call_guard<nb::gil_scoped_release>(),
+            "Close this device handle. The device stays alive until all associated streams and "
+            "buffers are also released."
+        )
 
         .def(
             "__enter__",
@@ -187,7 +260,8 @@ NB_MODULE(pyxdaq_device, m)
             },
             "addr"_a,
             "value"_a,
-            "mask"_a = xdaq::Device::value_mask
+            "mask"_a = xdaq::Device::value_mask,
+            "Write a register value synchronously."
         )
         .def(
             "set_register",
@@ -200,14 +274,16 @@ NB_MODULE(pyxdaq_device, m)
             },
             "addr"_a,
             "value"_a,
-            "mask"_a = xdaq::Device::value_mask
+            "mask"_a = xdaq::Device::value_mask,
+            "Set a register value."
         )
         .def(
             "send_registers",
             [](pyxdaq::DeviceHandle &h) {
                 h.check();
                 return h.device->send_registers();
-            }
+            },
+            "Ensure pending register writes are reflected on the device."
         )
         .def(
             "get_register_sync",
@@ -215,7 +291,8 @@ NB_MODULE(pyxdaq_device, m)
                 h.check();
                 return h.device->get_register_sync(addr);
             },
-            "addr"_a
+            "addr"_a,
+            "Read the current register value directly from the device."
         )
         .def(
             "get_register",
@@ -223,14 +300,16 @@ NB_MODULE(pyxdaq_device, m)
                 h.check();
                 return h.device->get_register(addr);
             },
-            "addr"_a
+            "addr"_a,
+            "Return a register value."
         )
         .def(
             "read_registers",
             [](pyxdaq::DeviceHandle &h) {
                 h.check();
                 return h.device->read_registers();
-            }
+            },
+            "Ensure register values are up to date from the device."
         )
         .def(
             "trigger",
@@ -239,7 +318,8 @@ NB_MODULE(pyxdaq_device, m)
                 return h.device->trigger(addr, bit);
             },
             "addr"_a,
-            "bit"_a
+            "bit"_a,
+            "Set a bit in a register to trigger a device action."
         )
         .def(
             "write",
@@ -253,7 +333,8 @@ NB_MODULE(pyxdaq_device, m)
                 );
             },
             "addr"_a,
-            "data"_a
+            "data"_a,
+            "Write raw bytes to the device at the given address."
         )
         .def(
             "read",
@@ -267,7 +348,8 @@ NB_MODULE(pyxdaq_device, m)
                 );
             },
             "addr"_a,
-            "buf"_a
+            "buf"_a,
+            "Read raw bytes from the device into buf at the given address."
         )
         .def(
             "start_read_stream",
@@ -339,7 +421,9 @@ NB_MODULE(pyxdaq_device, m)
             "callback"_a,
             nb::kw_only(),
             "chunk_size"_a = 0,
-            "max_queue_elements"_a = 4096
+            "max_queue_elements"_a = 4096,
+            "Start a raw read stream. callback(event, error) is called from a background thread "
+            "with ManagedBuffer events."
         )
         .def(
             "start_aligned_read_stream",
@@ -413,7 +497,9 @@ NB_MODULE(pyxdaq_device, m)
             "callback"_a,
             nb::kw_only(),
             "chunk_size"_a = 0,
-            "max_queue_elements"_a = 4096
+            "max_queue_elements"_a = 4096,
+            "Start an alignment-aware read stream. callback(event, error) is called from a "
+            "background thread with DataView events aligned to the given boundary."
         )
         .def(
             "get_status",
@@ -422,28 +508,50 @@ NB_MODULE(pyxdaq_device, m)
                 auto result = h.device->get_status();
                 if (!result) throw std::runtime_error(result.error());
                 return *result;
-            }
+            },
+            "Return the device status as a JSON string."
         )
-        .def("get_info", [](pyxdaq::DeviceHandle &h) {
-            h.check();
-            auto result = h.device->get_info();
-            if (!result) throw std::runtime_error(result.error());
-            return *result;
-        });
+        .def(
+            "get_info",
+            [](pyxdaq::DeviceHandle &h) {
+                h.check();
+                auto result = h.device->get_info();
+                if (!result) throw std::runtime_error(result.error());
+                return *result;
+            },
+            "Return device info as a JSON string."
+        );
 
-    nb::class_<xdaq::DeviceManager>(m, "DeviceManager")
+    nb::class_<xdaq::DeviceManager>(
+        m,
+        "DeviceManager",
+        "Manages discovery and creation of XDAQ devices loaded from a shared library."
+    )
         .def(
             "__repr__",
             [](const xdaq::DeviceManager &d) {
                 return fmt::format("<DeviceManager at {}>", static_cast<const void *>(&d));
             }
         )
-        .def("info", [](const xdaq::DeviceManager &d) { return d.info(); })
-        .def("location", [](const xdaq::DeviceManager &d) { return d.location(); })
-        .def("list_devices", [](const xdaq::DeviceManager &d) { return d.list_devices(); })
+        .def(
+            "info",
+            [](const xdaq::DeviceManager &d) { return d.info(); },
+            "Return manager info as a JSON string."
+        )
+        .def(
+            "location",
+            [](const xdaq::DeviceManager &d) { return d.location(); },
+            "Return the file system path of the loaded shared library."
+        )
+        .def(
+            "list_devices",
+            [](const xdaq::DeviceManager &d) { return d.list_devices(); },
+            "Return a JSON string listing available devices."
+        )
         .def(
             "get_device_options",
-            [](const xdaq::DeviceManager &d) { return d.get_device_options(); }
+            [](const xdaq::DeviceManager &d) { return d.get_device_options(); },
+            "Return the JSON schema describing valid options for create_device()."
         )
         .def(
             "create_device",
@@ -454,8 +562,15 @@ NB_MODULE(pyxdaq_device, m)
                     dev.release(),
                     [d](xdaq::Device *p) { delete p; },
                 }};
-            }
+            },
+            "config"_a,
+            "Create and open a device using a JSON config string. Returns a Device handle."
         );
 
-    m.def("get_device_manager", &xdaq::get_device_manager);
+    m.def(
+        "get_device_manager",
+        &xdaq::get_device_manager,
+        "path"_a,
+        "Load a device manager shared library from the given path."
+    );
 }
