@@ -1,7 +1,10 @@
 import gc
 import json
+
 import pytest
+
 from pylibxdaq import pyxdaq_device
+
 from .test_lifetime_manager import mock_manager_path
 
 

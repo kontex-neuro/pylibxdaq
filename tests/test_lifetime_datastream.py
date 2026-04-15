@@ -1,8 +1,12 @@
 import gc
 import json
-import pytest
+import threading
 import time
+
+import pytest
+
 from pylibxdaq import pyxdaq_device
+
 from .test_lifetime_manager import mock_manager_path
 
 
@@ -175,7 +179,7 @@ def test_device_close_with_active_stream(mock_manager_path, capfd):
     time.sleep(0.05)
     stream.stop()
     del stream
-    
+
     captured = capfd.readouterr()
     assert "MockDataStream destroyed" in captured.err
     assert "MockDevice(0) destroyed" in captured.err
@@ -210,14 +214,14 @@ def test_buffer_outlives_stream_strict(mock_manager_path, capfd):
     for ev in captured_events:
         arr = ev.numpy
         assert len(arr) > 0
-        
+
     del ev
     del arr
     captured_events.clear()
-    
+
     import gc
     gc.collect()
-    
+
     captured = capfd.readouterr()
     assert "MockDevice(0) destroyed" in captured.err
     assert "MockDeviceManager destroyed" in captured.err
@@ -251,7 +255,6 @@ def test_cyclic_reference_collection(mock_manager_path, capfd):
     assert "MockDataStream destroyed" in captured.err
     assert "MockDevice(0) destroyed" in captured.err
     assert "MockDeviceManager destroyed" in captured.err
-
 
 
 def test_aligned_read_stream(mock_manager_path, capfd):
@@ -411,13 +414,16 @@ def test_error_event_received(mock_manager_path):
     device = manager.create_device(json.dumps({"id": 0}))
 
     errors = []
+    error_received = threading.Event()
 
     def cb(event, err):
         if err is not None:
             errors.append(err)
+            error_received.set()
 
     with device.start_aligned_read_stream(0x11, 16, cb):
-        time.sleep(0.06)
+        # Wait for the error to be dispatched before __exit__ tears down the queue.
+        error_received.wait(timeout=2.0)
 
     del device
     del manager

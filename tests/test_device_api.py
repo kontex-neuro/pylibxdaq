@@ -1,7 +1,10 @@
 import json
+
 import numpy as np
 import pytest
+
 from pylibxdaq import pyxdaq_device
+
 from .test_lifetime_manager import mock_manager_path
 
 

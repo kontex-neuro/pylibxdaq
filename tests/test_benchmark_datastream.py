@@ -1,10 +1,13 @@
 import json
-import time
+import logging
 import statistics
 import threading
+import time
+
 import pytest
-import logging
+
 from pylibxdaq import pyxdaq_device
+
 from .test_lifetime_manager import mock_manager_path
 
 
