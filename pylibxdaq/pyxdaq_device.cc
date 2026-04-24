@@ -7,10 +7,13 @@
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/unique_ptr.h>
+#include <nanobind/stl/variant.h>
+#include <nanobind/stl/vector.h>
 #include <spdlog/spdlog.h>
 #include <xdaq/data_streams.h>
 #include <xdaq/device.h>
 #include <xdaq/device_manager.h>
+#include <xdaq/device_scanner.h>
 
 #include <chrono>
 #include <memory>
@@ -572,5 +575,66 @@ NB_MODULE(pyxdaq_device, m)
         &xdaq::get_device_manager,
         "path"_a,
         "Load a device manager shared library from the given path."
+    );
+
+    nb::class_<xdaq::DeviceFound>(m, "DeviceFound", "A device that is reachable and not in use.")
+        .def_prop_ro(
+            "device_manager_path",
+            [](const xdaq::DeviceFound &d) { return std::filesystem::path(d.device_manager_path); }
+        )
+        .def_ro("device_config_json", &xdaq::DeviceFound::device_config_json)
+        .def_ro("serial_number", &xdaq::DeviceFound::serial_number)
+        .def_ro("api_version", &xdaq::DeviceFound::api_version)
+        .def_ro("info_json", &xdaq::DeviceFound::info_json)
+        .def_ro("status_json", &xdaq::DeviceFound::status_json)
+        .def("__repr__", [](const xdaq::DeviceFound &d) {
+            return fmt::format("<DeviceFound serial={} api={}>", d.serial_number, d.api_version);
+        });
+
+    nb::class_<xdaq::DeviceOccupied>(m, "DeviceOccupied", "A device held open by another process.")
+        .def_prop_ro(
+            "device_manager_path",
+            [](const xdaq::DeviceOccupied &d) {
+                return std::filesystem::path(d.device_manager_path);
+            }
+        )
+        .def_ro("device_config_json", &xdaq::DeviceOccupied::device_config_json)
+        .def("__repr__", [](const xdaq::DeviceOccupied &d) {
+            return fmt::format("<DeviceOccupied manager={}>", d.device_manager_path);
+        });
+
+    nb::class_<xdaq::DeviceQueryFailed>(
+        m, "DeviceQueryFailed", "A device that is visible but could not be queried."
+    )
+        .def_prop_ro(
+            "device_manager_path",
+            [](const xdaq::DeviceQueryFailed &d) {
+                return std::filesystem::path(d.device_manager_path);
+            }
+        )
+        .def_ro("device_config_json", &xdaq::DeviceQueryFailed::device_config_json)
+        .def_ro("error", &xdaq::DeviceQueryFailed::error)
+        .def("__repr__", [](const xdaq::DeviceQueryFailed &d) {
+            return fmt::format("<DeviceQueryFailed error={}>", d.error);
+        });
+
+    m.def(
+        "scan_devices",
+        [](const std::vector<std::filesystem::path> &paths) {
+            nb::gil_scoped_release release;
+            return xdaq::scan_devices(paths);
+        },
+        "paths"_a,
+        "Scan a list of device manager plugin paths. Returns one result per enumerated device."
+    );
+
+    m.def(
+        "scan_devices_dir",
+        [](const std::filesystem::path &dir) {
+            nb::gil_scoped_release release;
+            return xdaq::scan_devices_dir(dir);
+        },
+        "dir"_a,
+        "Scan a directory for device manager plugins. Returns one result per enumerated device."
     );
 }

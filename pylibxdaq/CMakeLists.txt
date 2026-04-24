@@ -38,7 +38,7 @@ nanobind_add_module(pyxdaq_device
 )
 
 target_link_libraries(pyxdaq_device PRIVATE
-    xdaq::xdaq_device
+    xdaq::xdaq
     spdlog::spdlog
 )
 set_property(TARGET pyxdaq_device PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -58,7 +58,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/pyxdaq_device.pyi DESTINATION .)
 if(BUILD_TESTS)
     add_library(mock_device_manager SHARED tests/test_device_manager.cc)
     target_link_libraries(mock_device_manager PRIVATE
-        xdaq::xdaq_device
+        xdaq::xdaq
         spdlog::spdlog
         fmt::fmt
         nlohmann_json::nlohmann_json

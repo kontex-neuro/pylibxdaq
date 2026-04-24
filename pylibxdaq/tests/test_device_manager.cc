@@ -20,7 +20,10 @@ using nlohmann::json;
 namespace fs = std::filesystem;
 
 struct MockDataStream final : public xdaq::Device::DataStream {
-    MockDataStream(xdaq::DataStream::receive_callback &&callback, std::shared_ptr<void> resource, double event_rate, uint64_t max_events)
+    MockDataStream(
+        xdaq::DataStream::receive_callback &&callback, std::shared_ptr<void> resource,
+        double event_rate, uint64_t max_events
+    )
         : resource(std::move(resource)), event_rate(event_rate), max_events(max_events)
     {
         fmt::println(stderr, "MockDataStream constructed {}", (void *) this);
@@ -55,7 +58,9 @@ struct MockDataStream final : public xdaq::Device::DataStream {
                         continue;
                     }
 
-                    std::vector<unsigned char> dummy_data(16, static_cast<unsigned char>(events_sent % 256));
+                    std::vector<unsigned char> dummy_data(
+                        16, static_cast<unsigned char>(events_sent % 256)
+                    );
                     callback(xdaq::DataStream::Events::DataView{.data = dummy_data});
                     events_sent++;
                 }
@@ -92,7 +97,7 @@ struct MockDevice final : public xdaq::Device {
     double event_rate;
     uint64_t max_events;
 
-    explicit MockDevice(int id, double event_rate, uint64_t max_events) 
+    explicit MockDevice(int id, double event_rate, uint64_t max_events)
         : id(id), event_rate(event_rate), max_events(max_events)
     {
         fmt::println(stderr, "MockDevice({}) constructed {}", id, (void *) this);
@@ -127,16 +132,21 @@ struct MockDevice final : public xdaq::Device {
 
     std::expected<std::string, std::string> get_status() override
     {
-        return fmt::format(R"({{ }})");
+        return fmt::format(R"({{"API": "mock-1.0"}})");
     }
 
-    std::expected<std::string, std::string> get_info() override { return fmt::format(R"({{ }})"); }
+    std::expected<std::string, std::string> get_info() override
+    {
+        return fmt::format(R"({{"Serial Number": "MOCK{:03d}"}})", id);
+    }
 
     std::unique_ptr<xdaq::Device::DataStream> start_read_stream(
         addr_t addr, xdaq::DataStream::receive_callback &&callback, std::size_t chunk_size
     ) override
     {
-        return std::make_unique<MockDataStream>(std::move(callback), resource, event_rate, max_events);
+        return std::make_unique<MockDataStream>(
+            std::move(callback), resource, event_rate, max_events
+        );
     }
 };
 
@@ -194,10 +204,12 @@ struct MockDeviceManager final : public xdaq::DeviceManager {
     {
         auto cfg = json::parse(config);
         int id = cfg.value("id", 0);
-        double event_rate = cfg.value("event_rate", -1.0); // -1.0 for backwards compatibility
+        double event_rate = cfg.value("event_rate", -1.0);  // -1.0 for backwards compatibility
         uint64_t max_events = cfg.value("max_events", 0);
         return std::make_unique<ManagedDevice>(
-            std::make_unique<MockDevice>(id, event_rate, max_events), std::move(shared_from_this())
+            std::make_unique<MockDevice>(id, event_rate, max_events),
+            std::move(shared_from_this()),
+            config
         );
     }
 };
