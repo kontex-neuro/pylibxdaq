@@ -9,6 +9,11 @@ endif()
 if(MSVC)
     add_compile_definitions(NOMINMAX)
     add_compile_definitions(__PRETTY_FUNCTION__=__FUNCSIG__)
+    # nanobind temporarily #undef _DEBUG before including Python.h to avoid linking
+    # python312_d.lib. This causes corecrt.h to skip declaring _invalid_parameter,
+    # which MSVC STL later calls as ::_invalid_parameter in debug builds.
+    # _MSVC_STL_USE_ABORT_AS_DOOM_FUNCTION redirects those calls to abort().
+    add_compile_definitions(_MSVC_STL_USE_ABORT_AS_DOOM_FUNCTION)
 elseif(
     CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" OR
     (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
@@ -56,6 +61,17 @@ target_link_libraries(pyxdaq_device PRIVATE
 )
 set_property(TARGET pyxdaq_device PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_compile_features(pyxdaq_device PRIVATE cxx_std_23)
+
+# On Windows there is no rpath; DLLs must live next to the .pyd so that the
+# stub generator (and tests) can import pyxdaq_device.
+if(WIN32)
+    add_custom_command(TARGET pyxdaq_device POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_RUNTIME_DLLS:pyxdaq_device>
+            $<TARGET_FILE_DIR:pyxdaq_device>
+        COMMAND_EXPAND_LISTS
+    )
+endif()
 
 nanobind_add_stub(pyxdaq_device_stub
     MODULE pyxdaq_device
