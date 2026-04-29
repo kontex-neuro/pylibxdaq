@@ -23,12 +23,12 @@ jobs:
       OS_ARCH: ${{ matrix.os_arch.os }}-${{ matrix.os_arch.arch }}
 
     steps:
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.py }}
 
       - name: Install build tools
-        run: pip install conan ninja build twine pybind11_stubgen==2.5.3 typing_extensions pytest numpy
+        run: pip install conan ninja build twine pytest numpy
 
       - name: Install build tools (Ubuntu)
         if: matrix.os_arch.os == 'ubuntu-24.04'
@@ -42,13 +42,13 @@ jobs:
 
       - name: conan cache
         id: conan_cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.conan2
           key: ${{ env.OS_ARCH }}-conan
 
       - name: Setup Compiler (Windows)
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@138b1c783b65ec697d8342918306b7b2db4e88f1
         if: matrix.os_arch.os == 'windows-2022'
 
       - name: Setup Compiler (MacOS)
@@ -59,7 +59,7 @@ jobs:
           sed -i '' '/^#define _LIBCPP_HAS_NO_VENDOR_AVAILABILITY_ANNOTATIONS/d' "$(brew --prefix llvm@18)"/include/c++/v1/__config_site
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Conan setup
         run: |
@@ -98,7 +98,7 @@ jobs:
           rm -r dist && mv fixed_wheels dist
       
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.OS_ARCH }}
           path: dist/*.whl
