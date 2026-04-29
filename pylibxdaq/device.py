@@ -84,7 +84,7 @@ class DeviceInfo:
         Returns:
             A Device object wrapping the active low-level device instance.
         """
-        manager = pyxdaq_device.get_device_manager(str(self.manager_path))
+        manager = pyxdaq_device.get_device_manager(self.manager_path)
         raw = manager.create_device(json.dumps(self.options))
         return Device(self, raw, json.loads(raw.get_status()), json.loads(raw.get_info()))
 

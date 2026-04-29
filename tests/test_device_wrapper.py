@@ -64,7 +64,7 @@ def test_list_devices_sorted(mock_dir):
 
 def test_list_devices_filters_occupied(mock_dir, mock_manager_path):
     # Hold one device open — list_devices should not include it.
-    manager = pyxdaq_device.get_device_manager(str(mock_manager_path))
+    manager = pyxdaq_device.get_device_manager(mock_manager_path)
     device = manager.create_device(json.dumps({"id": 0}))
 
     try:

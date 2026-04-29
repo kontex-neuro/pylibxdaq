@@ -59,7 +59,7 @@ def test_scan_devices_dir_nonexistent():
 
 def test_scan_occupied_device(mock_manager_path):
     # Hold a device open in this process, then scan — it should appear as occupied.
-    manager = pyxdaq_device.get_device_manager(str(mock_manager_path))
+    manager = pyxdaq_device.get_device_manager(mock_manager_path)
     device = manager.create_device(json.dumps({"id": 0}))
 
     results = pyxdaq_device.scan_devices([mock_manager_path])
