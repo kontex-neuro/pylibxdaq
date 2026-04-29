@@ -93,6 +93,7 @@ jobs:
       - name: Fix binary and upload (MacOS)
         if: matrix.os_arch.os == 'macos-15'
         run: |
+          export DYLD_LIBRARY_PATH=$DYLD_LIBRARY_PATH:$(pwd)/pylibxdaq
           delocate-wheel -w fixed_wheels -v $(find dist -name '*.whl')
           rm -r dist && mv fixed_wheels dist
       
