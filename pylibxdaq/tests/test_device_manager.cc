@@ -2,6 +2,7 @@
 #include <spdlog/spdlog.h>
 #include <xdaq/device.h>
 #include <xdaq/device_manager.h>
+#include <xdaq/plugin_export.h>
 
 #include <atomic>
 #include <filesystem>
@@ -9,12 +10,6 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <thread>
-
-#ifdef WIN32
-#define EXPORT __declspec(dllexport)
-#else
-#define EXPORT __attribute__((visibility("default")))
-#endif
 
 using nlohmann::json;
 namespace fs = std::filesystem;
@@ -206,15 +201,12 @@ struct MockDeviceManager final : public xdaq::DeviceManager {
         int id = cfg.value("id", 0);
         double event_rate = cfg.value("event_rate", -1.0);  // -1.0 for backwards compatibility
         uint64_t max_events = cfg.value("max_events", 0);
-        return std::make_unique<ManagedDevice>(
-            std::make_unique<MockDevice>(id, event_rate, max_events),
-            std::move(shared_from_this()),
-            config
-        );
+        auto dev = std::make_unique<MockDevice>(id, event_rate, max_events);
+        return manage_device(std::move(dev), config);
     }
 };
 
-extern "C" EXPORT xdaq::DeviceManager *create_manager()
+extern "C" XDAQ_PLUGIN_EXPORT xdaq::DeviceManager *create_manager()
 {
     spdlog::set_level(spdlog::level::info);
     return new MockDeviceManager();

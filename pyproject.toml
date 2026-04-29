@@ -18,7 +18,7 @@ build-backend = "setuptools.build_meta"
 include = ["pylibxdaq", "pylibxdaq.*"]
 
 [tool.setuptools.package-data]
-"pylibxdaq" = ["py.typed", "*.so", "*.pyd"]
+"pylibxdaq" = ["py.typed", "*.so", "*.pyd", "*.dll", "*.dylib"]
 "pylibxdaq.managers" = ["*.so", "*.dll", "*.dylib"]
 "pylibxdaq.resources" = ["*.bit"]
 

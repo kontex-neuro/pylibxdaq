@@ -37,8 +37,21 @@ nanobind_add_module(pyxdaq_device
     pyxdaq_device.cc
 )
 
+if(APPLE)
+    set(_rpath_origin "@loader_path")
+elseif(UNIX)
+    set(_rpath_origin "$ORIGIN")
+endif()
+
+if(DEFINED _rpath_origin)
+    set_target_properties(pyxdaq_device PROPERTIES
+        INSTALL_RPATH "${_rpath_origin}"
+        BUILD_RPATH_USE_ORIGIN ON
+    )
+endif()
+
 target_link_libraries(pyxdaq_device PRIVATE
-    xdaq::xdaq
+    xdaq::xdaq_device
     spdlog::spdlog
 )
 set_property(TARGET pyxdaq_device PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -50,15 +63,15 @@ nanobind_add_stub(pyxdaq_device_stub
     DEPENDS pyxdaq_device
 )
 
-install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR} DESTINATION .)
-install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION .)
+xdaq_install_core(. .)
+xdaq_install_device_managers(./managers)
 install(TARGETS pyxdaq_device DESTINATION .)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/pyxdaq_device.pyi DESTINATION .)
 
 if(BUILD_TESTS)
     add_library(mock_device_manager SHARED tests/test_device_manager.cc)
     target_link_libraries(mock_device_manager PRIVATE
-        xdaq::xdaq
+        xdaq::xdaq_device
         spdlog::spdlog
         fmt::fmt
         nlohmann_json::nlohmann_json
