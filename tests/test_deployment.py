@@ -44,11 +44,15 @@ def test_managers_dir_exists():
 
 
 def test_libxdaq_device_deployed():
-    """libxdaq_device.so must be co-located with pyxdaq_device for RPATH to work."""
+    """xdaq_device shared lib must be co-located with pyxdaq_device for RPATH/DLL lookup."""
     package_root = Path(pyxdaq_device.__file__).parent
-    libs = list(package_root.glob("libxdaq_device*"))
+    import sys
+    if sys.platform == "win32":
+        libs = list(package_root.glob("xdaq_device.dll"))
+    else:
+        libs = list(package_root.glob("libxdaq_device*"))
     assert libs, (
-        f"libxdaq_device shared library not found in {package_root}. "
+        f"xdaq_device shared library not found in {package_root}. "
         "Check xdaq_install_core() in CMakeLists.txt."
     )
 
