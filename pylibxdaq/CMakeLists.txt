@@ -12,8 +12,20 @@ if(MSVC)
     # nanobind temporarily #undef _DEBUG before including Python.h to avoid linking
     # python312_d.lib. This causes corecrt.h to skip declaring _invalid_parameter,
     # which MSVC STL later calls as ::_invalid_parameter in debug builds.
-    # _MSVC_STL_USE_ABORT_AS_DOOM_FUNCTION redirects those calls to abort().
-    add_compile_definitions(_MSVC_STL_USE_ABORT_AS_DOOM_FUNCTION)
+    # Redirect those calls to abort() using the appropriate escape hatch:
+    #   old STL : _STL_CALL_ABORT_INSTEAD_OF_INVALID_PARAMETER
+    #   new STL : _MSVC_STL_USE_ABORT_AS_DOOM_FUNCTION
+    include(CheckCXXSourceCompiles)
+    check_cxx_source_compiles([=[
+        #define _STL_CALL_ABORT_INSTEAD_OF_INVALID_PARAMETER
+        #include <yvals.h>
+        int main() { return 0; }
+    ]=] _HAVE_STL_CALL_ABORT_FLAG)
+    if(_HAVE_STL_CALL_ABORT_FLAG)
+        add_compile_definitions(_STL_CALL_ABORT_INSTEAD_OF_INVALID_PARAMETER)
+    else()
+        add_compile_definitions(_MSVC_STL_USE_ABORT_AS_DOOM_FUNCTION)
+    endif()
 elseif(
     CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" OR
     (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
