@@ -77,9 +77,11 @@ target_compile_features(pyxdaq_device PRIVATE cxx_std_23)
 # On Windows there is no rpath; DLLs must live next to the .pyd so that the
 # stub generator (and tests) can import pyxdaq_device.
 if(WIN32)
+    file(GLOB _xdaq_core_dlls "${XDAQ_ROOT_DIR}/bin/*.dll")
     add_custom_command(TARGET pyxdaq_device POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_RUNTIME_DLLS:pyxdaq_device>
+            ${_xdaq_core_dlls}
             $<TARGET_FILE_DIR:pyxdaq_device>
         COMMAND_EXPAND_LISTS
     )
