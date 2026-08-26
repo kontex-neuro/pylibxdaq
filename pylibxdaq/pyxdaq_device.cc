@@ -21,6 +21,8 @@
 #include <string>
 #include <type_traits>
 
+#include "aligned_read_stream.hpp"
+
 namespace nb = nanobind;
 using namespace nb::literals;
 
@@ -436,53 +438,47 @@ NB_MODULE(pyxdaq_device, m)
                std::function<void(std::optional<pyxdaq::DataView>, std::optional<std::string>)>
                    callback,
                std::size_t chunk_size,
-               std::size_t max_queue_elements) -> std::optional<pyxdaq::DataStreamHandle> {
+               std::size_t max_queue_elements,
+               bool merged) -> std::optional<pyxdaq::DataStreamHandle> {
                 h.check();
+                // The sink is the same either way; only how chunks are cut differs.
+                xdaq::DataStream::receive_callback sink{[callback = std::move(callback),
+                                                         dev = h.device](auto &&event) {
+                    nb::gil_scoped_acquire gil;  // <--- Must hold GIL when background
+                                                 // thread calls Python callback!
+                    std::visit(
+                        [&callback, dev](auto &&event) {
+                            using T = std::decay_t<decltype(event)>;
+                            using namespace xdaq::DataStream;
+                            if constexpr (std::is_same_v<T, Events::DataView>) {
+                                try {
+                                    callback(pyxdaq::DataView{.data = event.data}, std::nullopt);
+                                } catch (const std::exception &e) {
+                                    spdlog::error("Error in callback: {}", e.what());
+                                }
+                            } else if constexpr (std::is_same_v<T, Events::OwnedData>) {
+                                callback(std::nullopt, "Unsupported data type: OwnedData");
+                            } else if constexpr (std::is_same_v<T, Events::Stop>) {
+                                try {
+                                    callback(std::nullopt, std::nullopt);
+                                } catch (const std::exception &e) {
+                                }
+                            } else if constexpr (std::is_same_v<T, Events::Error>) {
+                                try {
+                                    callback(std::nullopt, event.error);
+                                } catch (const std::exception &e) {
+                                }
+                            } else {
+                                static_assert(xdaq::always_false_v<T>, "non-exhaustive visitor");
+                            }
+                        },
+                        std::move(event)
+                    );
+                }};
                 auto stream = h.device->start_read_stream(
                     addr,
                     xdaq::DataStream::queue(
-                        xdaq::DataStream::aligned_read_stream(
-                            [callback = std::move(callback), dev = h.device](auto &&event) {
-                                nb::gil_scoped_acquire gil;  // <--- Must hold GIL when background
-                                                             // thread calls Python callback!
-                                std::visit(
-                                    [&callback, dev](auto &&event) {
-                                        using T = std::decay_t<decltype(event)>;
-                                        using namespace xdaq::DataStream;
-                                        if constexpr (std::is_same_v<T, Events::DataView>) {
-                                            try {
-                                                callback(
-                                                    pyxdaq::DataView{.data = event.data},
-                                                    std::nullopt
-                                                );
-                                            } catch (const std::exception &e) {
-                                                spdlog::error("Error in callback: {}", e.what());
-                                            }
-                                        } else if constexpr (std::is_same_v<T, Events::OwnedData>) {
-                                            callback(
-                                                std::nullopt, "Unsupported data type: OwnedData"
-                                            );
-                                        } else if constexpr (std::is_same_v<T, Events::Stop>) {
-                                            try {
-                                                callback(std::nullopt, std::nullopt);
-                                            } catch (const std::exception &e) {
-                                            }
-                                        } else if constexpr (std::is_same_v<T, Events::Error>) {
-                                            try {
-                                                callback(std::nullopt, event.error);
-                                            } catch (const std::exception &e) {
-                                            }
-                                        } else {
-                                            static_assert(
-                                                xdaq::always_false_v<T>, "non-exhaustive visitor"
-                                            );
-                                        }
-                                    },
-                                    std::move(event)
-                                );
-                            },
-                            alignment
-                        ),
+                        pyxdaq::aligned_read_stream(std::move(sink), alignment, merged),
                         64,
                         max_queue_elements,
                         std::chrono::nanoseconds{0}
@@ -501,8 +497,15 @@ NB_MODULE(pyxdaq_device, m)
             nb::kw_only(),
             "chunk_size"_a = 0,
             "max_queue_elements"_a = 4096,
+            "merged"_a = false,
             "Start an alignment-aware read stream. callback(event, error) is called from a "
-            "background thread with DataView events aligned to the given boundary."
+            "background thread with DataView events aligned to the given boundary. Every "
+            "view is a whole multiple of alignment, including the last: a trailing partial "
+            "sample is dropped at stop rather than delivered short.\n\n"
+            "With merged=True, a chunk that straddles a sample boundary is delivered as one "
+            "event instead of two -- the spanning sample is made contiguous with the body in "
+            "a scratch buffer, costing one memcpy of the chunk to halve the callback rate. "
+            "Latency per sample is unchanged."
         )
         .def(
             "get_status",
