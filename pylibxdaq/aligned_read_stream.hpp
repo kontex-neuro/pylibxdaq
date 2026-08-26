@@ -15,44 +15,23 @@ namespace pyxdaq
 {
 
 /**
- * @brief Alignment adapter, replacing `xdaq::DataStream::aligned_read_stream`.
+ * @brief Cuts a byte stream into chunks that are whole multiples of `alignment`.
  *
- * Local to pylibxdaq so that the two fixes below need only a rebuild rather than a
- * re-export of the libxdaq conan package. Intended to move upstream once soaked.
+ * Replaces `xdaq::DataStream::aligned_read_stream`, differing from it in three ways:
  *
- * Differs from `xdaq::DataStream::aligned_read_stream` in three ways:
- *
- * `merge`
- *     Upstream never copies the body of a chunk: when a chunk straddles a sample
- *     boundary it assembles the spanning sample in a side buffer, emits it alone,
- *     then emits the remainder in place. A straddling chunk therefore costs two
- *     downstream events, and two thirds of chunks straddle at the chunk sizes used
- *     for low-latency streaming. That is the right trade when the consumer is
- *     cheap, and the wrong one when each event costs a GIL acquire and a Python
- *     dispatch. With `merge`, the spanning sample and the body are made contiguous
- *     in a reused scratch buffer instead: one memcpy of the chunk, one event.
- *     Latency is unchanged -- both events were already available at the same
- *     instant -- but the event rate halves, and that is what limits the
- *     small-chunk end.
- *
- * `Stop`
- *     Upstream flushes whatever partial sample remains as a short final view.
- *     A fraction of a sample cannot be parsed, so every consumer has to recognize
- *     and discard it, and one that does not reports a spurious parse failure at
- *     every shutdown. Dropped here instead.
- *
- * `Error`
- *     Upstream forwards the error and keeps its partial sample. The dropped bytes
- *     leave a hole of unknown size, so gluing the next chunk onto that partial
- *     misframes every sample from then on. The partial is discarded here, which
- *     resynchronizes on the next chunk boundary.
+ *  - `merge` delivers one event per upstream chunk instead of two. Without it, a
+ *    chunk straddling a sample boundary is emitted as the spanning sample followed
+ *    by the remainder; with it, the two are made contiguous in a reused scratch
+ *    buffer. Costs one memcpy of the chunk, halves the event rate, and lowers
+ *    latency by roughly one callback's overhead.
+ *  - A trailing partial sample is dropped at `Stop` rather than emitted short, so
+ *    every delivered view is a whole multiple of `alignment`.
+ *  - `Error` discards the partial sample, resynchronizing on the next chunk. The
+ *    dropped bytes leave a hole, so keeping it would misframe everything after.
  *
  * @param on_receive Callback to receive the aligned data chunks.
  * @param alignment The alignment boundary, in bytes.
  * @param merge Deliver one event per upstream chunk rather than two.
- *
- * @note Every delivered chunk is a whole multiple of `alignment`, including the
- * last -- there is no short final view.
  */
 [[nodiscard]] inline xdaq::DataStream::receive_callback aligned_read_stream(
     xdaq::DataStream::receive_callback &&on_receive, std::size_t alignment, bool merge = false
