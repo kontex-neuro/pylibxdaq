@@ -48,10 +48,20 @@ find_package(xdaq REQUIRED)
 find_package(nlohmann_json)
 
 option(BUILD_TESTS "Build test modules" ON)
+if(BUILD_TESTS)
+    enable_testing()
+endif()
 
 nanobind_add_module(pyxdaq_device
     STABLE_ABI
     pyxdaq_device.cc
+)
+
+# Stage the extensions in a package-shaped directory, so `import pylibxdaq.pyxdaq_device` --
+# which xdaqnp_core does, for the shared Device binding -- also resolves in the build tree.
+set(PYLIBXDAQ_STAGE_DIR "${CMAKE_BINARY_DIR}/pylibxdaq")
+set_target_properties(pyxdaq_device PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${PYLIBXDAQ_STAGE_DIR}"
 )
 
 if(APPLE)
@@ -90,6 +100,7 @@ endif()
 nanobind_add_stub(pyxdaq_device_stub
     MODULE pyxdaq_device
     OUTPUT pyxdaq_device.pyi
+    PYTHON_PATH ${PYLIBXDAQ_STAGE_DIR}
     DEPENDS pyxdaq_device
 )
 
@@ -97,6 +108,8 @@ xdaq_install_core(. .)
 xdaq_install_device_managers(./managers)
 install(TARGETS pyxdaq_device DESTINATION .)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/pyxdaq_device.pyi DESTINATION .)
+
+add_subdirectory(xdaqnp)
 
 if(BUILD_TESTS)
     add_library(mock_device_manager SHARED tests/test_device_manager.cc)

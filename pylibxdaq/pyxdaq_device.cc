@@ -22,27 +22,13 @@
 #include <type_traits>
 
 #include "aligned_read_stream.hpp"
+#include "pyxdaq_handles.hpp"
 
 namespace nb = nanobind;
 using namespace nb::literals;
 
 namespace pyxdaq
 {
-
-struct DeviceHandle {
-    std::shared_ptr<xdaq::Device> device;
-
-    explicit DeviceHandle(std::shared_ptr<xdaq::Device> d) : device(std::move(d)) {}
-
-    void check() const
-    {
-        if (!device) throw nb::value_error("Device is already closed");
-    }
-
-    void close() noexcept { device.reset(); }
-
-    bool is_closed() const noexcept { return !device; }
-};
 
 struct ManagedBuffer {
     std::unique_ptr<unsigned char[], void (*)(unsigned char *)> data;

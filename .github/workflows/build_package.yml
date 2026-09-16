@@ -80,6 +80,7 @@ jobs:
 
       - name: Run tests
         run: |
+          ctest --test-dir build/Release --output-on-failure
           pip install $(find dist -name '*.whl')
           pytest tests --log-cli-level=INFO
 
@@ -97,6 +98,29 @@ jobs:
           delocate-wheel -w fixed_wheels -v $(find dist -name '*.whl')
           rm -r dist && mv fixed_wheels dist
       
+      - name: Smoke test final wheel in isolation
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          import venv
+
+          wheels = list(Path("dist").resolve().glob("*.whl"))
+          assert len(wheels) == 1, wheels
+          with tempfile.TemporaryDirectory() as temporary:
+              environment = Path(temporary) / "venv"
+              venv.EnvBuilder(with_pip=True).create(environment)
+              python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+              subprocess.run([str(python), "-I", "-m", "pip", "install", str(wheels[0])], check=True, cwd=temporary)
+              subprocess.run(
+                  [str(python), "-I", "-c",
+                   "import numpy; from pylibxdaq import pyxdaq_device, xdaqnp; "
+                   "assert all(hasattr(xdaqnp, name) for name in xdaqnp.__all__)"],
+                  check=True, cwd=temporary,
+              )
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:

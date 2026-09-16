@@ -2,7 +2,7 @@
 name = "pylibxdaq"
 version = "0.8.0"
 requires-python = ">=3.12"
-dependencies = ["typing_extensions"]
+dependencies = ["typing_extensions", "numpy"]
 license = "MIT"
 license-files = ["LICENSE"]
 classifiers = [
@@ -19,6 +19,7 @@ include = ["pylibxdaq", "pylibxdaq.*"]
 
 [tool.setuptools.package-data]
 "pylibxdaq" = ["py.typed", "*.so", "*.pyd", "*.dll", "*.dylib"]
+"pylibxdaq.xdaqnp" = ["*.pyi", "*.so", "*.pyd", "*.dll", "*.dylib"]
 "pylibxdaq.managers" = ["*.so", "*.dll", "*.dylib"]
 "pylibxdaq.resources" = ["*.bit"]
 
