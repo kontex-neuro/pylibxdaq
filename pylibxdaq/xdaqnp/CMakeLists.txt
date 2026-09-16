@@ -5,6 +5,12 @@
 
 find_package(libxdaqnp REQUIRED)
 
+if(UNIX)
+    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/xdaq-runtime-$<CONFIG>.sh"
+        CONTENT "export LD_LIBRARY_PATH=\"${XDAQ_ROOT_DIR}/lib/xdaq:$<TARGET_FILE_DIR:xdaq::xdaqnp>:\$LD_LIBRARY_PATH\"\nexport DYLD_LIBRARY_PATH=\"${XDAQ_ROOT_DIR}/lib/xdaq:$<TARGET_FILE_DIR:xdaq::xdaqnp>:\$DYLD_LIBRARY_PATH\"\n"
+    )
+endif()
+
 if(BUILD_TESTS)
     nanobind_add_module(_test_np_native STABLE_ABI ../tests/test_np_native.cpp)
     target_include_directories(_test_np_native PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -95,8 +101,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/xdaqnp_core.pyi DESTINATION xdaqnp)
 # libxdaqnp itself. Everywhere but Windows it goes to the package root, alongside the
 # libxdaq_device that xdaq_install_core() puts there, and the rpath above finds it. Windows has no
 # rpath and CPython only searches the extension's own directory, so there it sits next to the .pyd.
-if(WIN32)
-    install(IMPORTED_RUNTIME_ARTIFACTS xdaq::xdaqnp RUNTIME DESTINATION xdaqnp)
-else()
-    install(IMPORTED_RUNTIME_ARTIFACTS xdaq::xdaqnp LIBRARY DESTINATION .)
-endif()
+libxdaqnp_install_xdaqnp_runtime(
+    LIBRARY_DEST .
+    RUNTIME_DEST xdaqnp
+)

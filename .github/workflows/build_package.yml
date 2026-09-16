@@ -82,8 +82,14 @@ jobs:
 
       - name: Build and install pylibxdaq
         working-directory: ./pylibxdaq
+        shell: bash
         run: |
           cmake -S . -B ../build/Release --preset conan-release -DCMAKE_INSTALL_PREFIX="../pylibxdaq"
+          if [[ "$RUNNER_OS" != "Windows" ]]; then
+            source ../build/Release/xdaq-runtime-Release.sh
+            printf 'LD_LIBRARY_PATH=%s\n' "$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+            printf 'DYLD_LIBRARY_PATH=%s\n' "$DYLD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          fi
           cmake --build ../build/Release --preset conan-release --target install
       
       - name: Build package
