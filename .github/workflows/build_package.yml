@@ -67,10 +67,22 @@ jobs:
           git clone https://github.com/kontex-neuro/kontex-conan.git kontex-conan
           conan remote add --force kontex-neuro ./kontex-conan
 
-      - name: Build and install pylibxdaq
+      - name: Install Conan dependencies
         working-directory: ./pylibxdaq
         run: |
           conan install . --build=missing --profile:all ${{ env.OS_ARCH }} -s build_type=Release -of ..
+
+      - name: Activate Conan runtime paths (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          source build/Release/generators/conanrun.sh
+          printf 'LD_LIBRARY_PATH=%s\n' "${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          printf 'DYLD_LIBRARY_PATH=%s\n' "${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Build and install pylibxdaq
+        working-directory: ./pylibxdaq
+        run: |
           cmake -S . -B ../build/Release --preset conan-release -DCMAKE_INSTALL_PREFIX="../pylibxdaq"
           cmake --build ../build/Release --preset conan-release --target install
       
