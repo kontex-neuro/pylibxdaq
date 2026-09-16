@@ -12,6 +12,23 @@ import pytest
 from pylibxdaq import xdaqnp as _api
 
 
+@pytest.mark.parametrize(
+    "native_name",
+    ["NP1Probe", "NP2003NP2004Probe", "NP2013NP2014Probe"],
+)
+def test_probe_native_type(native_name):
+    native_type = type(native_name, (), {})
+    probe = _api.Probe(native_type(), None)
+    assert probe.native_type is native_type
+    with pytest.raises(AttributeError):
+        probe.native_type = native_type
+
+
+def test_probe_native_type_does_not_classify_handle():
+    probe = _api.Probe(object(), None)
+    assert probe.native_type is object
+
+
 class FakeCoreStream:
 
     def __init__(self):

@@ -198,6 +198,11 @@ class Probe(_Wrapper, _Streamable):
         self._stream_lock = threading.Lock()
 
     @property
+    def native_type(self) -> type:
+        """The wrapped handle's concrete xdaqnp_core type; no hardware I/O."""
+        return type(self._core)
+
+    @property
     def stream(self) -> Stream:
         # Cache under a lock so all readers share one guard.
         if self._stream is None:
