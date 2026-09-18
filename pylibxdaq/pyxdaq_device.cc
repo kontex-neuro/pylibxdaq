@@ -218,7 +218,6 @@ NB_MODULE(pyxdaq_device, m)
         .def(
             "close",
             &pyxdaq::DeviceHandle::close,
-            nb::call_guard<nb::gil_scoped_release>(),
             "Close this device handle. The device stays alive until all associated streams and "
             "buffers are also released."
         )
@@ -236,8 +235,7 @@ NB_MODULE(pyxdaq_device, m)
             [](pyxdaq::DeviceHandle &h,
                std::optional<nb::object>,
                std::optional<nb::object>,
-               std::optional<nb::object>) { h.close(); },
-            nb::call_guard<nb::gil_scoped_release>()
+                    std::optional<nb::object>) { h.close(); }
         )
 
         .def(
@@ -247,7 +245,9 @@ NB_MODULE(pyxdaq_device, m)
                xdaq::Device::value_t value,
                xdaq::Device::value_t mask) {
                 h.check();
-                return h.device->set_register_sync(addr, value, mask);
+                auto device = h.device;
+                nb::gil_scoped_release release;
+                return device->set_register_sync(addr, value, mask);
             },
             "addr"_a,
             "value"_a,

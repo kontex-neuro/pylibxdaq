@@ -1,5 +1,7 @@
 import gc
 import json
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
@@ -89,6 +91,37 @@ def test_device_context_manager(mock_manager_path, capfd):
 
     with pytest.raises(ValueError, match="Device is already closed"):
         device.read_registers()
+
+
+@pytest.mark.parametrize("use_context_exit", [False, True])
+def test_device_close_during_register_write(mock_manager_path, use_context_exit):
+    manager = pyxdaq_device.get_device_manager(mock_manager_path)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        for iteration in range(50):
+            device = manager.create_device(json.dumps({"id": 0}))
+            barrier = Barrier(2)
+
+            def write_register():
+                barrier.wait(timeout=5)
+                try:
+                    return device.set_register_sync(0x00, 0xFF)
+                except ValueError as error:
+                    assert str(error) == "Device is already closed"
+                    return None
+
+            pending = executor.submit(write_register)
+            barrier.wait(timeout=5)
+            if use_context_exit:
+                device.__exit__(None, None, None)
+            else:
+                device.close()
+
+            assert pending.result(timeout=5) in (None, pyxdaq_device.ReturnCode.Success)
+            assert device.closed
+            device.close()
+            with pytest.raises(ValueError, match="Device is already closed"):
+                device.set_register_sync(0x00, 0xFF)
 
 
 def test_multiple_devices_lifetime(mock_manager_path, capfd):

@@ -38,7 +38,12 @@ struct DeviceHandle {
         if (!device) throw nb::value_error("Device is already closed");
     }
 
-    void close() noexcept { device.reset(); }
+    void close() noexcept
+    {
+        auto detached_device = std::move(device);
+        nb::gil_scoped_release release;
+        detached_device.reset();
+    }
 
     bool is_closed() const noexcept { return !device; }
 };
