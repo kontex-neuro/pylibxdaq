@@ -351,7 +351,9 @@ NB_MODULE(pyxdaq_device, m)
                std::size_t chunk_size,
                std::size_t max_queue_elements) -> std::optional<pyxdaq::DataStreamHandle> {
                 h.check();
-                auto stream = h.device->start_read_stream(
+                auto stream = [&] {
+                    nb::gil_scoped_release release;
+                    return h.device->start_read_stream(
                     addr,
                     xdaq::DataStream::queue(
                         [callback = std::move(callback), dev = h.device](auto &&event) {
@@ -402,6 +404,7 @@ NB_MODULE(pyxdaq_device, m)
                     ),
                     chunk_size
                 );
+                }();
                 if (stream == nullptr) return std::nullopt;
                 return pyxdaq::DataStreamHandle{{
                     stream.release(),
