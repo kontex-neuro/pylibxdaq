@@ -12,7 +12,7 @@ jobs:
         os_arch:
           [
             { os: windows-2022, arch: x64 },
-            { os: macos-15, arch: arm64 },
+            { os: macos-26, arch: arm64 },
             { os: ubuntu-24.04, arch: x64 }
           ]
         py: ["3.12"]
@@ -36,7 +36,7 @@ jobs:
           pip install auditwheel
 
       - name: Install build tools (MacOS)
-        if: matrix.os_arch.os == 'macos-15'
+        if: matrix.os_arch.os == 'macos-26'
         run: |
           pip install delocate
 
@@ -50,13 +50,6 @@ jobs:
       - name: Setup Compiler (Windows)
         uses: ilammy/msvc-dev-cmd@138b1c783b65ec697d8342918306b7b2db4e88f1
         if: matrix.os_arch.os == 'windows-2022'
-
-      - name: Setup Compiler (MacOS)
-        if: matrix.os_arch.os == 'macos-15'
-        run: |
-          echo "CC=$(brew --prefix llvm@18)/bin/clang" >> $GITHUB_ENV
-          echo "CXX=$(brew --prefix llvm@18)/bin/clang++" >> $GITHUB_ENV
-          sed -i '' '/^#define _LIBCPP_HAS_NO_VENDOR_AVAILABILITY_ANNOTATIONS/d' "$(brew --prefix llvm@18)"/include/c++/v1/__config_site
 
       - name: Checkout code
         uses: actions/checkout@v6
@@ -110,7 +103,7 @@ jobs:
           rm -r dist && mv wheelhouse dist
 
       - name: Fix binary and upload (MacOS)
-        if: matrix.os_arch.os == 'macos-15'
+        if: matrix.os_arch.os == 'macos-26'
         run: |
           export DYLD_LIBRARY_PATH=$DYLD_LIBRARY_PATH:$(pwd)/pylibxdaq
           delocate-wheel -w fixed_wheels -v $(find dist -name '*.whl')
