@@ -23,6 +23,7 @@
 
 #include "aligned_read_stream.hpp"
 #include "pyxdaq_handles.hpp"
+#include "queued_read_stream.hpp"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -72,6 +73,48 @@ struct DataStreamHandle {
     }
 
     bool is_stopped() const noexcept { return !stream; }
+};
+
+/// A read stream whose buffers go into a native queue (QueuedReadStream) that Python drains in
+/// batches: no Python callback per buffer. Without a device stream (``QueuedStream.detached``) it is
+/// fed by ``inject*``, for tests.
+struct QueuedStreamHandle {
+    std::shared_ptr<QueuedReadStream> queue;
+    std::unique_ptr<xdaq::Device::DataStream> stream;
+    std::shared_ptr<xdaq::Device> device;  // keeps the plugin (and its buffers' deleters) loaded
+
+    QueuedStreamHandle(
+        std::shared_ptr<QueuedReadStream> q, std::unique_ptr<xdaq::Device::DataStream> s,
+        std::shared_ptr<xdaq::Device> d
+    )
+        : queue(std::move(q)), stream(std::move(s)), device(std::move(d))
+    {
+    }
+    QueuedStreamHandle(QueuedStreamHandle &&) = default;
+    QueuedStreamHandle &operator=(QueuedStreamHandle &&) = default;
+
+    void stop() noexcept
+    {
+        if (stream) stream->stop();
+    }
+
+    // Stop the reader thread, then drop what is still queued, then release the device.
+    void close()
+    {
+        if (stream) {
+            stream->stop();
+            stream->wait_stop();
+            stream.reset();
+        }
+        if (queue) queue->clear();
+        device.reset();
+    }
+
+    ~QueuedStreamHandle()
+    {
+        nb::gil_scoped_release release;
+        close();
+    }
 };
 
 }  // namespace pyxdaq
@@ -197,6 +240,142 @@ NB_MODULE(pyxdaq_device, m)
                 return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(b.data.data(), 1, shape, obj);
             },
             "Zero-copy view into the data. Only safe to use within the callback; do not store."
+        );
+
+    nb::class_<pyxdaq::QueuedStreamHandle>(
+        m,
+        "QueuedStream",
+        "A read stream into a native queue, drained in batches by read(): the device's reader thread "
+        "queues each buffer without Python or the GIL. Use as a context manager (or close()) for a "
+        "clean stop."
+    )
+        .def(
+            "read",
+            [](pyxdaq::QueuedStreamHandle &h, std::size_t max_bytes, std::size_t min_bytes,
+               double timeout) -> nb::object {
+                std::optional<pyxdaq::QueuedReadStream::Batch> batch;
+                {
+                    nb::gil_scoped_release release;
+                    batch = h.queue->take(max_bytes, min_bytes, timeout);
+                }
+                if (!batch) return nb::none();
+                auto *raw = batch->data.release();
+                nb::capsule owner(raw, [](void *p) noexcept {
+                    delete[] static_cast<unsigned char *>(p);
+                });
+                size_t shape[1] = {batch->size};
+                auto array = nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(raw, 1, shape, owner);
+                return nb::make_tuple(nb::cast(array), batch->received_at, batch->buffers);
+            },
+            "max_bytes"_a = std::size_t{1} << 20,
+            "min_bytes"_a = 0,
+            "timeout"_a = 0.0,
+            "Take the queued buffers, in order and whole, up to max_bytes (at least one), as one "
+            "uint8 array: (array, received_at, buffers), or None when nothing is queued. Waits up "
+            "to timeout seconds (GIL released) for min_bytes (at least one buffer); past the "
+            "timeout it takes what is there. received_at is the oldest buffer's hand-over time "
+            "(time.perf_counter's clock)."
+        )
+        .def_prop_ro(
+            "queued_bytes",
+            [](const pyxdaq::QueuedStreamHandle &h) { return h.queue->queued(); },
+            "Bytes queued and not yet read."
+        )
+        .def_prop_ro(
+            "queued_buffers",
+            [](const pyxdaq::QueuedStreamHandle &h) { return h.queue->queued_count(); },
+            "Buffers queued and not yet read."
+        )
+        .def_prop_ro(
+            "error",
+            [](const pyxdaq::QueuedStreamHandle &h) { return h.queue->error_message(); },
+            "The stream's first error (the device's, or the queue's overflow), or None. Sticky."
+        )
+        .def_prop_ro(
+            "stopped",
+            [](const pyxdaq::QueuedStreamHandle &h) { return h.queue->is_stopped(); },
+            "True once the device's stream has delivered its final Stop."
+        )
+        .def(
+            "stats",
+            [](const pyxdaq::QueuedStreamHandle &h) {
+                const auto s = h.queue->snapshot();
+                nb::dict d;
+                d["buffers"] = s.buffers;
+                d["bytes"] = s.bytes;
+                d["max_buffer_bytes"] = s.max_buffer_bytes;
+                d["taken_bytes"] = s.taken_bytes;
+                d["batches"] = s.batches;
+                d["max_queued_bytes"] = s.max_queued_bytes;
+                d["max_queued_buffers"] = s.max_queued_buffers;
+                d["max_arrival_gap"] = s.max_arrival_gap;
+                d["arrival_gaps"] = s.arrival_gaps;
+                d["arrival_gap_threshold"] = h.queue->arrival_gap_threshold;
+                return d;
+            },
+            "Counters: buffers and bytes handed over, taken bytes and batches, the queue's high-water "
+            "marks, and the pacing of the hand-over (longest gap between two buffers, gaps over "
+            "arrival_gap_threshold seconds)."
+        )
+        .def(
+            "stop",
+            &pyxdaq::QueuedStreamHandle::stop,
+            nb::call_guard<nb::gil_scoped_release>(),
+            "Signal the reader to stop (non-blocking); its final Stop sets `stopped`."
+        )
+        .def(
+            "close",
+            &pyxdaq::QueuedStreamHandle::close,
+            nb::call_guard<nb::gil_scoped_release>(),
+            "Stop the reader, wait for it, drop what is still queued and release the device."
+        )
+        .def(
+            "__enter__",
+            [](pyxdaq::QueuedStreamHandle &h) -> pyxdaq::QueuedStreamHandle & { return h; },
+            nb::rv_policy::reference
+        )
+        .def(
+            "__exit__",
+            [](pyxdaq::QueuedStreamHandle &h,
+               std::optional<nb::object>,
+               std::optional<nb::object>,
+               std::optional<nb::object>) { h.close(); },
+            nb::call_guard<nb::gil_scoped_release>()
+        )
+        .def_static(
+            "detached",
+            [](std::size_t max_queue_bytes, double arrival_gap_threshold) {
+                return pyxdaq::QueuedStreamHandle{
+                    std::make_shared<pyxdaq::QueuedReadStream>(max_queue_bytes, arrival_gap_threshold),
+                    nullptr,
+                    nullptr};
+            },
+            "max_queue_bytes"_a = std::size_t{64} << 20,
+            "arrival_gap_threshold"_a = 0.005,
+            "A queue without a device, fed by inject/inject_error/inject_stop (tests)."
+        )
+        .def(
+            "inject",
+            [](pyxdaq::QueuedStreamHandle &h, nb::bytes data) {
+                xdaq::DataStream::Events::OwnedData owned{
+                    .buffer = {new unsigned char[data.size()], [](unsigned char *p) { delete[] p; }},
+                    .length = data.size()};
+                std::memcpy(owned.data(), data.c_str(), data.size());
+                h.queue->push(std::move(owned));
+            },
+            "data"_a,
+            "Queue one buffer as the device's reader would (tests)."
+        )
+        .def(
+            "inject_error",
+            [](pyxdaq::QueuedStreamHandle &h, std::string message) { h.queue->push_error(message); },
+            "message"_a,
+            "Deliver an error event (tests)."
+        )
+        .def(
+            "inject_stop",
+            [](pyxdaq::QueuedStreamHandle &h) { h.queue->push_stop(); },
+            "Deliver the stop event (tests)."
         );
 
     nb::class_<pyxdaq::DeviceHandle>(
@@ -418,6 +597,35 @@ NB_MODULE(pyxdaq_device, m)
             "max_queue_elements"_a = 4096,
             "Start a raw read stream. callback(event, error) is called from a background thread "
             "with ManagedBuffer events."
+        )
+        .def(
+            "start_queued_read_stream",
+            [](pyxdaq::DeviceHandle &h,
+               std::uint32_t addr,
+               std::size_t chunk_size,
+               std::size_t max_queue_bytes,
+               double arrival_gap_threshold) -> std::optional<pyxdaq::QueuedStreamHandle> {
+                h.check();
+                auto queue =
+                    std::make_shared<pyxdaq::QueuedReadStream>(max_queue_bytes, arrival_gap_threshold);
+                std::unique_ptr<xdaq::Device::DataStream> stream;
+                {
+                    nb::gil_scoped_release release;
+                    stream = h.device->start_read_stream(
+                        addr, pyxdaq::QueuedReadStream::sink(queue), chunk_size
+                    );
+                }
+                if (stream == nullptr) return std::nullopt;
+                return pyxdaq::QueuedStreamHandle{std::move(queue), std::move(stream), h.device};
+            },
+            "addr"_a,
+            nb::kw_only(),
+            "chunk_size"_a = 0,
+            "max_queue_bytes"_a = std::size_t{64} << 20,
+            "arrival_gap_threshold"_a = 0.005,
+            "Start a raw read stream into a native queue (QueuedStream): the reader thread queues "
+            "each buffer without calling Python; read() takes batches. A buffer that would pass "
+            "max_queue_bytes sets the error 'RHX host stream queue overflow' and is dropped."
         )
         .def(
             "start_aligned_read_stream",
