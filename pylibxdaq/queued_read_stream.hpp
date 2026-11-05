@@ -10,6 +10,8 @@
 
 #include <xdaq/device.h>
 
+#include <time.h>
+
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -31,7 +33,7 @@ struct QueuedReadStream {
 
     struct Item {
         OwnedData data;
-        double received_at;  // steady_clock seconds (CLOCK_MONOTONIC: Python's time.perf_counter)
+        double received_at;  // seconds on Python's time.perf_counter clock (now())
     };
 
     struct Batch {
@@ -58,9 +60,15 @@ struct QueuedReadStream {
     {
     }
 
+    // Python's time.perf_counter: CLOCK_MONOTONIC (steady_clock) on Linux. On macOS it is mach_absolute_time
+    // (CLOCK_UPTIME_RAW, stops while asleep), but libc++'s steady_clock is CLOCK_MONOTONIC_RAW (counts sleep).
     static double now() noexcept
     {
+#if defined(__APPLE__)
+        return static_cast<double>(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) * 1e-9;
+#else
         return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
+#endif
     }
 
     // Producer side (the device's reader thread) -------------------------------------------------
