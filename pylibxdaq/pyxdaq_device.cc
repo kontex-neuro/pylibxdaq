@@ -41,6 +41,19 @@ struct DataView {
     std::span<unsigned char> data;
 };
 
+/// The reader's batch while streaming (Device::DataStream::set_batch): reads of at most
+/// max_bytes; with fewer waiting, wait up to max_wait_us for more (0: take what is waiting).
+inline void set_stream_batch(xdaq::Device::DataStream *stream, std::size_t max_bytes, std::int64_t max_wait_us)
+{
+    if (!stream) throw nb::value_error("The stream is stopped (or detached: no device reader)");
+    bool changed = false;
+    {
+        nb::gil_scoped_release release;
+        changed = stream->set_batch(max_bytes, std::chrono::microseconds(max_wait_us));
+    }
+    if (!changed) throw nb::value_error("This device's stream has no adjustable batch");
+}
+
 struct DataStreamHandle {
     std::shared_ptr<xdaq::Device::DataStream> stream;
 
@@ -141,6 +154,16 @@ NB_MODULE(pyxdaq_device, m)
                     "<DataStream stream={}>", static_cast<const void *>(h.stream.get())
                 );
             }
+        )
+        .def(
+            "set_batch",
+            [](pyxdaq::DataStreamHandle &h, std::size_t max_bytes, std::int64_t max_wait_us) {
+                pyxdaq::set_stream_batch(h.stream.get(), max_bytes, max_wait_us);
+            },
+            "max_bytes"_a, "max_wait_us"_a,
+            "Change the reader's batch while streaming: reads of at most max_bytes (a multiple of 4096); with "
+            "less waiting, wait up to max_wait_us for more, then take what is there (0: take whatever is "
+            "waiting at once). Raises ValueError if the device's stream has none."
         )
         .def(
             "stop",
@@ -316,6 +339,16 @@ NB_MODULE(pyxdaq_device, m)
             "Counters: buffers and bytes handed over, taken bytes and batches, the queue's high-water "
             "marks, and the pacing of the hand-over (longest gap between two buffers, gaps over "
             "arrival_gap_threshold seconds)."
+        )
+        .def(
+            "set_batch",
+            [](pyxdaq::QueuedStreamHandle &h, std::size_t max_bytes, std::int64_t max_wait_us) {
+                pyxdaq::set_stream_batch(h.stream.get(), max_bytes, max_wait_us);
+            },
+            "max_bytes"_a, "max_wait_us"_a,
+            "Change the reader's batch while streaming: reads of at most max_bytes (a multiple of 4096); with "
+            "less waiting, wait up to max_wait_us for more, then take what is there (0: take whatever is "
+            "waiting at once). Raises ValueError if the device's stream has none."
         )
         .def(
             "stop",
